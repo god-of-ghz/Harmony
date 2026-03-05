@@ -4,6 +4,8 @@ export interface Account {
     id: string;
     email: string;
     is_creator: boolean;
+    isGuest?: boolean;
+    trusted_servers?: string[];
 }
 
 export interface Profile {
@@ -65,8 +67,18 @@ interface AppState {
     showUnknownTags: boolean;
     setShowUnknownTags: (show: boolean) => void;
 
-    serverUrl: string;
-    setServerUrl: (url: string) => void;
+    knownServers: string[];
+    setKnownServers: (urls: string[]) => void;
+    addKnownServer: (url: string) => void;
+
+    trustedServers: string[];
+    setTrustedServers: (urls: string[]) => void;
+
+    serverMap: Record<string, string>;
+    setServerMap: (map: Record<string, string>) => void;
+
+    isGuestSession: boolean;
+    setIsGuestSession: (isGuest: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -87,9 +99,26 @@ export const useAppStore = create<AppState>((set) => ({
     showUnknownTags: false,
     setShowUnknownTags: (show) => set({ showUnknownTags: show }),
 
-    serverUrl: localStorage.getItem('harmony_server_url') || 'http://localhost:3001',
-    setServerUrl: (url) => {
-        localStorage.setItem('harmony_server_url', url);
-        set({ serverUrl: url });
+    knownServers: JSON.parse(localStorage.getItem('harmony_known_servers') || '["http://localhost:3001"]'),
+    setKnownServers: (urls) => {
+        localStorage.setItem('harmony_known_servers', JSON.stringify(urls));
+        set({ knownServers: urls });
     },
+    addKnownServer: (url) => set((state) => {
+        if (!state.knownServers.includes(url)) {
+            const newServers = [...state.knownServers, url];
+            localStorage.setItem('harmony_known_servers', JSON.stringify(newServers));
+            return { knownServers: newServers };
+        }
+        return state;
+    }),
+
+    trustedServers: [],
+    setTrustedServers: (urls) => set({ trustedServers: urls }),
+
+    serverMap: {},
+    setServerMap: (map) => set({ serverMap: map }),
+
+    isGuestSession: false,
+    setIsGuestSession: (isGuest) => set({ isGuestSession: isGuest })
 }));

@@ -12,13 +12,16 @@ export const LoginSignup = () => {
     const [successMessage, setSuccessMessage] = useState('');
     const [rememberMe, setRememberMe] = useState(false);
 
-    const { setCurrentAccount, setClaimedProfiles, serverUrl, setServerUrl } = useAppStore();
+    const { setCurrentAccount, setClaimedProfiles, knownServers, addKnownServer, setTrustedServers, setIsGuestSession } = useAppStore();
+    const [initialServerUrl, setInitialServerUrl] = useState(knownServers[0] || 'http://localhost:3001');
 
-    const fetchProfiles = async (accountId: string) => {
+    const fetchProfiles = async (accountId: string, baseUrl: string) => {
         try {
-            const res = await fetch(`${serverUrl}/api/accounts/${accountId}/profiles`);
+            const res = await fetch(`${baseUrl}/api/accounts/${accountId}/profiles`);
             if (res.ok) {
                 const profiles = await res.json();
+                // Since this might be called on login for the initial server, we should append.
+                // We will handle full multi-server profile syncing in App/Sidebar.
                 setClaimedProfiles(profiles);
             }
         } catch (err) {
@@ -31,7 +34,10 @@ export const LoginSignup = () => {
         if (cached) {
             try {
                 const account = JSON.parse(cached);
-                fetchProfiles(account.id).then(() => setCurrentAccount(account));
+                setIsGuestSession(account.isGuest || false);
+                setTrustedServers(account.trusted_servers || []);
+                // Wait for sidebar to fetch profiles from all servers
+                setCurrentAccount(account);
             } catch (e) { }
         }
     }, []);
@@ -50,7 +56,7 @@ export const LoginSignup = () => {
 
         if (mode === 'change-password') {
             try {
-                const res = await fetch(`${serverUrl}/api/accounts/password`, {
+                const res = await fetch(`${initialServerUrl}/api/accounts/password`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email, newPassword: password })
@@ -73,10 +79,10 @@ export const LoginSignup = () => {
         const endpoint = mode === 'login' ? '/api/accounts/login' : '/api/accounts/signup';
 
         try {
-            const res = await fetch(`${serverUrl}${endpoint}`, {
+            const res = await fetch(`${initialServerUrl}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
+                body: JSON.stringify({ email, password, initialServerUrl })
             });
             const data = await res.json();
 
@@ -84,10 +90,31 @@ export const LoginSignup = () => {
                 if (rememberMe) {
                     localStorage.setItem('harmony_account', JSON.stringify(data));
                 }
-                await fetchProfiles(data.id);
+                setTrustedServers(data.trusted_servers || []);
+                addKnownServer(initialServerUrl);
+                setIsGuestSession(false);
+                await fetchProfiles(data.id, initialServerUrl);
                 setCurrentAccount(data);
             } else {
                 setError(data.error || 'An error occurred');
+            }
+        } catch (err: any) {
+            setError(err.message);
+        }
+    };
+
+    const handleGuestLogin = async () => {
+        try {
+            const res = await fetch(`${initialServerUrl}/api/guest/login`, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setIsGuestSession(true);
+                addKnownServer(initialServerUrl);
+                setCurrentAccount(data);
+            } else {
+                setError(data.error || 'Failed to login as guest');
             }
         } catch (err: any) {
             setError(err.message);
@@ -225,12 +252,12 @@ export const LoginSignup = () => {
                 </div>
 
                 <div style={{ marginTop: '16px', borderTop: '1px solid var(--background-modifier-accent)', paddingTop: '16px' }}>
-                    <label htmlFor="serverUrl" style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Network Server URL</label>
+                    <label htmlFor="initialServerUrl" style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Initial Network Server URL</label>
                     <input
-                        id="serverUrl"
+                        id="initialServerUrl"
                         type="text"
-                        value={serverUrl}
-                        onChange={e => setServerUrl(e.target.value)}
+                        value={initialServerUrl}
+                        onChange={e => setInitialServerUrl(e.target.value)}
                         placeholder="http://96.230.218.248:3001"
                         style={{
                             width: '100%', backgroundColor: 'var(--bg-tertiary)', border: 'none', borderRadius: '3px',
@@ -238,6 +265,14 @@ export const LoginSignup = () => {
                             boxSizing: 'border-box'
                         }}
                     />
+
+                    <button type="button" onClick={handleGuestLogin} style={{
+                        width: '100%', backgroundColor: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--background-modifier-accent)',
+                        borderRadius: '3px', padding: '10px', fontSize: '14px', fontWeight: 'bold',
+                        cursor: 'pointer', marginTop: '16px', transition: 'color 0.2s, border-color 0.2s'
+                    }}>
+                        Continue as Guest (No Profile)
+                    </button>
                 </div>
             </form>
         </div>

@@ -45,14 +45,17 @@ call npm install
 
 echo.
 echo =========================================
+set /p SERVER_PORT="Enter a port for the Harmony Server (default 3001): "
+if "%SERVER_PORT%"=="" set SERVER_PORT=3001
+
 echo Starting the Harmony Server!
-echo You can connect to it on Port 3001!
+echo You can connect to it on Port %SERVER_PORT%!
 echo =========================================
 cd %~dp0
 
-echo [!] Stopping any existing Harmony background processes on Port 3001...
-FOR /F "tokens=5" %%T IN ('netstat -a -n -o ^| findstr :3001') DO TaskKill.exe /PID %%T /F >nul 2>&1
+echo [!] Stopping any existing Harmony background processes on Port %SERVER_PORT%...
+FOR /F "tokens=5" %%T IN ('netstat -a -n -o ^| findstr :%SERVER_PORT%') DO TaskKill.exe /PID %%T /F >nul 2>&1
 
-call npm run dev
+call npm run dev -- --port %SERVER_PORT%
 
 pause

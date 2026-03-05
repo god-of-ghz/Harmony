@@ -4,7 +4,7 @@ import { useAppStore } from '../store/appStore';
 import { Send } from 'lucide-react';
 
 export const ChatArea = () => {
-    const { activeChannelId, activeChannelName, activeServerId, claimedProfiles, showUnknownTags, serverUrl } = useAppStore();
+    const { activeChannelId, activeChannelName, activeServerId, claimedProfiles, showUnknownTags, serverMap } = useAppStore();
     const currentProfile = claimedProfiles.find(p => p.server_id === activeServerId);
     const [messages, setMessages] = useState<MessageData[]>([]);
     const [serverProfiles, setServerProfiles] = useState<Profile[]>([]);
@@ -18,20 +18,20 @@ export const ChatArea = () => {
     const LIMIT = 50;
 
     useEffect(() => {
-        if (!activeServerId) return;
-        fetch(`${serverUrl}/api/servers/${activeServerId}/profiles`)
+        if (!activeServerId || !serverMap[activeServerId]) return;
+        fetch(`${serverMap[activeServerId]}/api/servers/${activeServerId}/profiles`)
             .then(res => res.json())
             .then(data => setServerProfiles(data))
             .catch(console.error);
-    }, [activeServerId, serverUrl]);
+    }, [activeServerId, serverMap]);
 
     useEffect(() => {
-        if (!activeChannelId) return;
+        if (!activeChannelId || !activeServerId || !serverMap[activeServerId]) return;
 
         setMessages([]);
         setHasMoreMessages(true);
 
-        fetch(`${serverUrl}/api/channels/${activeChannelId}/messages?limit=${LIMIT}`)
+        fetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}`)
             .then(res => res.json())
             .then(data => {
                 setMessages(data);
@@ -39,11 +39,12 @@ export const ChatArea = () => {
                 setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }), 100);
             })
             .catch(console.error);
-    }, [activeChannelId, serverUrl]);
+    }, [activeChannelId, activeServerId, serverMap]);
 
     useEffect(() => {
+        if (!activeChannelId || !activeServerId || !serverMap[activeServerId]) return;
         // Basic WebSocket connection
-        const wsUrl = serverUrl.replace(/^http/, 'ws');
+        const wsUrl = serverMap[activeServerId].replace(/^http/, 'ws');
         const ws = new WebSocket(wsUrl);
         ws.onmessage = (event) => {
             try {
@@ -58,7 +59,7 @@ export const ChatArea = () => {
         };
 
         return () => { ws.close(); };
-    }, [activeChannelId, serverUrl]);
+    }, [activeChannelId, activeServerId, serverMap]);
 
     const handleScroll = () => {
         if (!scrollContainerRef.current || isLoadingMore || !hasMoreMessages || !activeChannelId) return;
@@ -71,7 +72,7 @@ export const ChatArea = () => {
             const oldestMessage = messages[0];
             const previousHeight = scrollContainerRef.current.scrollHeight;
 
-            fetch(`${serverUrl}/api/channels/${activeChannelId}/messages?limit=${LIMIT}&cursor=${encodeURIComponent(oldestMessage.timestamp)}`)
+            fetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}&cursor=${encodeURIComponent(oldestMessage.timestamp)}`)
                 .then(res => res.json())
                 .then(data => {
                     if (data.length < LIMIT) setHasMoreMessages(false);
@@ -102,7 +103,7 @@ export const ChatArea = () => {
             parsedContent = parsedContent.replace(regex, `<@${p.id}>`);
         }
 
-        fetch(`${serverUrl}/api/channels/${activeChannelId}/messages`, {
+        fetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content: parsedContent, authorId: currentProfile.id })

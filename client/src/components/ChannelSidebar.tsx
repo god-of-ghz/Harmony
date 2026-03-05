@@ -5,7 +5,7 @@ import { Hash, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { ServerSettings } from './ServerSettings';
 
 export const ChannelSidebar = () => {
-    const { activeServerId, activeChannelId, setActiveChannelId, serverUrl } = useAppStore();
+    const { activeServerId, activeChannelId, setActiveChannelId, serverMap } = useAppStore();
     const [channels, setChannels] = useState<ChannelData[]>([]);
     const [categories, setCategories] = useState<CategoryData[]>([]);
     const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
@@ -19,9 +19,12 @@ export const ChannelSidebar = () => {
             return;
         }
 
+        const baseUrl = serverMap[activeServerId];
+        if (!baseUrl) return;
+
         Promise.all([
-            fetch(`${serverUrl}/api/servers/${activeServerId}/categories`).then(r => r.json()),
-            fetch(`${serverUrl}/api/servers/${activeServerId}/channels`).then(r => r.json())
+            fetch(`${baseUrl}/api/servers/${activeServerId}/categories`).then(r => r.json()),
+            fetch(`${baseUrl}/api/servers/${activeServerId}/channels`).then(r => r.json())
         ])
             .then(([catsData, chansData]) => {
                 setCategories(catsData);

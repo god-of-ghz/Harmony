@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
+import crypto from 'crypto';
 import { createApp } from '../src/app';
 
 // Mock DB
@@ -134,10 +135,37 @@ describe('Harmony Express App', () => {
     });
 
     it('POST /api/accounts/login should return account', async () => {
-        mockDb.getQuery.mockResolvedValue({ id: 'acc1', email: 'test@test.com', is_creator: 0 });
+        const hash = crypto.createHash('sha256').update('password').digest('hex');
+        mockDb.getQuery.mockResolvedValue({ id: 'acc1', email: 'test@test.com', is_creator: 0, password_hash: hash });
+        mockDb.allQuery.mockResolvedValue([{ server_url: 'http://trusted' }]);
+
         const res = await request(app).post('/api/accounts/login').send({ email: 'test@test.com', password: 'password' });
         expect(res.status).toBe(200);
         expect(res.body.email).toBe('test@test.com');
+        expect(res.body.trusted_servers).toEqual(['http://trusted']);
+    });
+
+    it('POST /api/accounts/login should try federating to initialServerUrl if local hash fails', async () => {
+        mockDb.getQuery.mockResolvedValue(null); // Local user not found
+        // mock trusted servers
+        mockDb.allQuery.mockResolvedValue([]);
+        // mock fetch
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ account: { id: 'acc2', email: 'test@test.com', password_hash: 'hash', is_creator: 0, updated_at: 100 }, trusted_servers: ['http://fed'] })
+        });
+
+        const res = await request(app).post('/api/accounts/login').send({ email: 'test@test.com', password: 'password', initialServerUrl: 'http://foo' });
+        expect(res.status).toBe(200);
+        expect(res.body.trusted_servers).toEqual(['http://fed']);
+        expect(global.fetch).toHaveBeenCalledWith('http://foo/api/accounts/federate', expect.any(Object));
+    });
+
+    it('POST /api/guest/login should return a guest id', async () => {
+        const res = await request(app).post('/api/guest/login');
+        expect(res.status).toBe(200);
+        expect(res.body.isGuest).toBe(true);
+        expect(res.body.id).toContain('guest-');
     });
 
     it('GET /api/accounts/:accountId/profiles should return profiles from DB', async () => {
@@ -148,5 +176,63 @@ describe('Harmony Express App', () => {
         expect(res.status).toBe(200);
         expect(res.body).toEqual(fakeProfiles);
         expect(mockDb.allQuery).toHaveBeenCalledWith('SELECT * FROM profiles WHERE account_id = ?', ['acc1']);
+    });
+
+    it('POST /api/accounts/federate should return account and trusted_servers on valid credentials', async () => {
+        const hash = crypto.createHash('sha256').update('password').digest('hex');
+        mockDb.getQuery.mockResolvedValue({ id: 'acc1', email: 'test@test.com', password_hash: hash });
+        mockDb.allQuery.mockResolvedValue([{ server_url: 'http://trusted' }]);
+
+        const res = await request(app).post('/api/accounts/federate').send({ email: 'test@test.com', password: 'password' });
+        expect(res.status).toBe(200);
+        expect(res.body.account.email).toBe('test@test.com');
+        expect(res.body.trusted_servers).toEqual(['http://trusted']);
+    });
+
+    it('POST /api/accounts/federate should return 401 on invalid credentials', async () => {
+        mockDb.getQuery.mockResolvedValue(null);
+        const res = await request(app).post('/api/accounts/federate').send({ email: 'test@test.com', password: 'wrong' });
+        expect(res.status).toBe(401);
+    });
+
+    it('POST /api/accounts/sync should update account if incoming is newer', async () => {
+        mockDb.getQuery.mockResolvedValue({ updated_at: 100 });
+        mockDb.runQuery.mockResolvedValue(undefined);
+
+        const res = await request(app).post('/api/accounts/sync').send({
+            account: { id: 'acc1', email: 'test@test.com', password_hash: 'hash', is_creator: 0, updated_at: 200 },
+            trusted_servers: ['http://new']
+        });
+        expect(res.status).toBe(200);
+        expect(mockDb.runQuery).toHaveBeenCalledWith(
+            'UPDATE accounts SET email = ?, password_hash = ?, is_creator = ?, updated_at = ? WHERE id = ?',
+            ['test@test.com', 'hash', 0, 200, 'acc1']
+        );
+    });
+
+    it('POST /api/accounts/:accountId/trusted_servers should push identity sync to new server', async () => {
+        mockDb.runQuery.mockResolvedValue(undefined);
+        mockDb.getQuery.mockResolvedValue({ id: 'acc1', email: 'test@test.com' }); // full account
+        mockDb.allQuery.mockResolvedValue([{ server_url: 'http://new' }]); // trusted list
+
+        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+
+        const res = await request(app).post('/api/accounts/acc1/trusted_servers').send({ serverUrl: 'http://new' });
+        expect(res.status).toBe(200);
+
+        // Assert fetch was called to push sync
+        expect(global.fetch).toHaveBeenCalledWith('http://new/api/accounts/sync', expect.objectContaining({
+            method: 'POST'
+        }));
+    });
+
+    it('POST /api/guest/merge should update profile account_id', async () => {
+        mockDb.runQuery.mockResolvedValue(undefined);
+        const res = await request(app).post('/api/guest/merge').send({ profileId: 'p1', serverId: 's1', accountId: 'acc1' });
+        expect(res.status).toBe(200);
+        expect(mockDb.runQuery).toHaveBeenCalledWith(
+            'UPDATE profiles SET account_id = ? WHERE id = ? AND server_id = ?',
+            ['acc1', 'p1', 's1']
+        );
     });
 });

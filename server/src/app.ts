@@ -187,11 +187,11 @@ export const createApp = (db: any, broadcastMessage: (v: any) => void) => {
     app.post('/api/servers/:serverId/profiles', async (req, res) => {
         try {
             const { serverId } = req.params;
-            const { accountId, nickname } = req.body;
+            const { accountId, nickname, isGuest } = req.body;
             const id = crypto.randomUUID();
             await db.runQuery(
                 `INSERT INTO profiles (id, server_id, account_id, original_username, nickname, avatar, role) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [id, serverId, accountId, nickname, nickname, '', 'USER']
+                [id, serverId, isGuest ? null : accountId, nickname, nickname, '', 'USER']
             );
             const newProfile = await db.getQuery('SELECT * FROM profiles WHERE id = ? AND server_id = ?', [id, serverId]);
             res.json(newProfile);
@@ -239,15 +239,143 @@ export const createApp = (db: any, broadcastMessage: (v: any) => void) => {
     });
 
     app.post('/api/accounts/login', async (req, res) => {
+        const { email, password, initialServerUrl } = req.body;
+        const hash = crypto.createHash('sha256').update(password).digest('hex');
+        try {
+            let account: any = await db.getQuery('SELECT * FROM accounts WHERE email = ?', [email]);
+
+            if (account && account.password_hash === hash) {
+                const servers = await db.allQuery('SELECT server_url FROM trusted_servers WHERE account_id = ?', [account.id]);
+                return res.json({ id: account.id, email: account.email, is_creator: account.is_creator, trusted_servers: servers.map((s: any) => s.server_url) });
+            }
+
+            let serversToTry: string[] = [];
+            if (account) {
+                const ts = await db.allQuery('SELECT server_url FROM trusted_servers WHERE account_id = ?', [account.id]);
+                serversToTry = ts.map((s: any) => s.server_url);
+            }
+            if (initialServerUrl && !serversToTry.includes(initialServerUrl)) {
+                serversToTry.push(initialServerUrl);
+            }
+
+            for (const url of serversToTry) {
+                try {
+                    const fedRes = await fetch(`${url}/api/accounts/federate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    if (fedRes.ok) {
+                        const data: any = await fedRes.json();
+                        // Save to local DB
+                        if (account) {
+                            await db.runQuery('UPDATE accounts SET password_hash = ?, is_creator = ?, updated_at = ? WHERE id = ?', [data.account.password_hash, data.account.is_creator, data.account.updated_at, data.account.id]);
+                        } else {
+                            await db.runQuery('INSERT INTO accounts (id, email, password_hash, is_creator, updated_at) VALUES (?, ?, ?, ?, ?)', [data.account.id, data.account.email, data.account.password_hash, data.account.is_creator, data.account.updated_at]);
+                        }
+
+                        await db.runQuery('DELETE FROM trusted_servers WHERE account_id = ?', [data.account.id]);
+                        for (const sUrl of data.trusted_servers) {
+                            await db.runQuery('INSERT INTO trusted_servers (account_id, server_url) VALUES (?, ?)', [data.account.id, sUrl]);
+                        }
+                        account = data.account;
+                        return res.json({ id: account.id, email: account.email, is_creator: account.is_creator, trusted_servers: data.trusted_servers });
+                    }
+                } catch (e: any) {
+                    console.error(`Failed to federate with ${url}:`, e.message);
+                }
+            }
+
+            res.status(401).json({ error: "Invalid credentials" });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post('/api/accounts/federate', async (req, res) => {
         const { email, password } = req.body;
         const hash = crypto.createHash('sha256').update(password).digest('hex');
         try {
-            const account: any = await db.getQuery('SELECT id, email, is_creator FROM accounts WHERE email = ? AND password_hash = ?', [email, hash]);
+            const account: any = await db.getQuery('SELECT * FROM accounts WHERE email = ? AND password_hash = ?', [email, hash]);
             if (account) {
-                res.json(account);
+                const servers = await db.allQuery('SELECT server_url FROM trusted_servers WHERE account_id = ?', [account.id]);
+                res.json({ account, trusted_servers: servers.map((s: any) => s.server_url) });
             } else {
                 res.status(401).json({ error: "Invalid credentials" });
             }
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post('/api/accounts/sync', async (req, res) => {
+        const { account, trusted_servers } = req.body;
+        try {
+            const existing: any = await db.getQuery('SELECT updated_at FROM accounts WHERE id = ?', [account.id]);
+            if (existing) {
+                if (account.updated_at > existing.updated_at) {
+                    await db.runQuery('UPDATE accounts SET email = ?, password_hash = ?, is_creator = ?, updated_at = ? WHERE id = ?', [account.email, account.password_hash, account.is_creator, account.updated_at, account.id]);
+                } else {
+                    return res.json({ success: true, message: 'Local is newer or same' });
+                }
+            } else {
+                await db.runQuery('INSERT INTO accounts (id, email, password_hash, is_creator, updated_at) VALUES (?, ?, ?, ?, ?)', [account.id, account.email, account.password_hash, account.is_creator, account.updated_at]);
+            }
+
+            await db.runQuery('DELETE FROM trusted_servers WHERE account_id = ?', [account.id]);
+            for (const url of (trusted_servers || [])) {
+                await db.runQuery('INSERT INTO trusted_servers (account_id, server_url) VALUES (?, ?)', [account.id, url]);
+            }
+            res.json({ success: true });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post('/api/accounts/:accountId/trusted_servers', async (req, res) => {
+        const { accountId } = req.params;
+        const { serverUrl } = req.body;
+        try {
+            await db.runQuery('INSERT OR IGNORE INTO trusted_servers (account_id, server_url) VALUES (?, ?)', [accountId, serverUrl]);
+            await db.runQuery("UPDATE accounts SET updated_at = CAST(strftime('%s','now') AS INTEGER) WHERE id = ?", [accountId]);
+
+            // Push the full updated account struct to the new peer
+            const fullAccount: any = await db.getQuery('SELECT * FROM accounts WHERE id = ?', [accountId]);
+            const trustedList = await db.allQuery('SELECT server_url FROM trusted_servers WHERE account_id = ?', [accountId]);
+
+            try {
+                await fetch(`${serverUrl}/api/accounts/sync`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        account: fullAccount,
+                        trusted_servers: trustedList.map((t: any) => t.server_url)
+                    })
+                });
+            } catch (syncErr) {
+                console.error(`Failed to push identity sync to ${serverUrl}:`, syncErr);
+            }
+
+            res.json({ success: true });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post('/api/guest/login', async (req, res) => {
+        try {
+            const guestId = `guest-${crypto.randomUUID()}`;
+            res.json({ id: guestId, email: 'Guest', is_creator: false, isGuest: true, trusted_servers: [] });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post('/api/guest/merge', async (req, res) => {
+        const { profileId, serverId, accountId } = req.body;
+        try {
+            await db.runQuery(`UPDATE profiles SET account_id = ? WHERE id = ? AND server_id = ?`, [accountId, profileId, serverId]);
+            res.json({ success: true, profileId });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }

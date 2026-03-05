@@ -3,14 +3,16 @@ import type { Profile } from '../store/appStore';
 import { useAppStore } from '../store/appStore';
 
 export const ClaimProfile = ({ serverId }: { serverId: string }) => {
-    const { currentAccount, addClaimedProfile, serverUrl } = useAppStore();
+    const { currentAccount, addClaimedProfile, serverMap, isGuestSession } = useAppStore();
+    const serverUrl = serverMap[serverId];
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [freshName, setFreshName] = useState('');
-    const [isFreshStart, setIsFreshStart] = useState(false);
+    const [isFreshStart, setIsFreshStart] = useState(isGuestSession);
 
     useEffect(() => {
+        if (!serverUrl) return;
         fetch(`${serverUrl}/api/servers/${serverId}/profiles`)
             .then(res => res.json())
             .then(data => {
@@ -21,7 +23,7 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
     }, [serverId, serverUrl]);
 
     const handleClaim = (profileId: string) => {
-        if (!currentAccount) return; // Ensure currentAccount exists
+        if (!currentAccount || !serverUrl) return; // Ensure currentAccount exists
         fetch(`${serverUrl}/api/profiles/claim`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -41,12 +43,12 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
 
     const handleFreshStart = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!freshName.trim() || !currentAccount) return;
+        if (!freshName.trim() || !currentAccount || !serverUrl) return;
 
         fetch(`${serverUrl}/api/servers/${serverId}/profiles`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accountId: currentAccount.id, nickname: freshName })
+            body: JSON.stringify({ accountId: currentAccount.id, nickname: freshName, isGuest: isGuestSession })
         })
             .then(res => res.json())
             .then(newProfile => {
@@ -69,23 +71,25 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
                 <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '24px' }}>Claim your old Discord identity or start fresh.</p>
 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                    {!isGuestSession && (
+                        <button
+                            style={{
+                                flex: 1, padding: '8px', border: 'none', borderRadius: '4px', cursor: 'pointer',
+                                backgroundColor: !isFreshStart ? 'var(--brand-experiment)' : 'var(--bg-tertiary)', color: 'white'
+                            }}
+                            onClick={() => setIsFreshStart(false)}
+                        >Claim Existing</button>
+                    )}
                     <button
                         style={{
                             flex: 1, padding: '8px', border: 'none', borderRadius: '4px', cursor: 'pointer',
-                            backgroundColor: !isFreshStart ? 'var(--brand-experiment)' : 'var(--bg-tertiary)', color: 'white'
-                        }}
-                        onClick={() => setIsFreshStart(false)}
-                    >Claim Existing</button>
-                    <button
-                        style={{
-                            flex: 1, padding: '8px', border: 'none', borderRadius: '4px', cursor: 'pointer',
-                            backgroundColor: isFreshStart ? 'var(--brand-experiment)' : 'var(--bg-tertiary)', color: 'white'
+                            backgroundColor: isFreshStart || isGuestSession ? 'var(--brand-experiment)' : 'var(--bg-tertiary)', color: 'white'
                         }}
                         onClick={() => setIsFreshStart(true)}
                     >Fresh Start</button>
                 </div>
 
-                {!isFreshStart ? (
+                {!isFreshStart && !isGuestSession ? (
                     <>
                         <input
                             type="text"

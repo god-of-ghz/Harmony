@@ -1,8 +1,16 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 
-// Use a local database file strictly bounded to the same backend folder structure natively
-const dbPath = path.resolve(__dirname, '../harmony.db');
+const portArgIndex = process.argv.indexOf('--port');
+const portArgValue = portArgIndex !== -1 ? process.argv[portArgIndex + 1] : null;
+const portEqualsArg = process.argv.find(arg => arg.startsWith('--port='));
+const portEqualsValue = portEqualsArg ? portEqualsArg.split('=')[1] : null;
+
+const PORT = portEqualsValue || portArgValue || process.env.PORT || 3001;
+const dbFileName = (PORT === 3001 || PORT === '3001') ? 'harmony.db' : `harmony_${PORT}.db`;
+
+// Use a local database file bounded to the host execution directory (supports pkg standalone wrapper)
+const dbPath = path.resolve(process.cwd(), dbFileName);
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database', err);
@@ -23,7 +31,8 @@ function initDB() {
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
-        is_creator BOOLEAN DEFAULT 0
+        is_creator BOOLEAN DEFAULT 0,
+        updated_at INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER))
       )
     `);
 
@@ -89,7 +98,24 @@ function initDB() {
       )
     `);
 
+    // Trusted Servers table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS trusted_servers (
+        account_id TEXT NOT NULL,
+        server_url TEXT NOT NULL,
+        PRIMARY KEY (account_id, server_url),
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+      )
+    `);
+
     console.log('Database tables initialized.');
+
+    // Migration: Add updated_at to accounts if it doesn't exist
+    db.run("ALTER TABLE accounts ADD COLUMN updated_at INTEGER DEFAULT 0", (err) => {
+      if (err && !err.message.includes('duplicate column name')) {
+        console.error('Error adding updated_at to accounts:', err);
+      }
+    });
 
     // Migration: Add position to channels if it doesn't exist
     db.run("ALTER TABLE channels ADD COLUMN position INTEGER DEFAULT 0", (err) => {

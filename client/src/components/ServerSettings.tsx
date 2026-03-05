@@ -9,7 +9,8 @@ type Category = { id: string, name: string, position: number };
 type ProfileExt = { id: string, nickname: string, aliases: string };
 
 export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
-    const { activeServerId, currentAccount, claimedProfiles, showUnknownTags, setShowUnknownTags, serverUrl } = useAppStore();
+    const { activeServerId, currentAccount, claimedProfiles, showUnknownTags, setShowUnknownTags, serverMap } = useAppStore();
+    const serverUrl = serverMap[activeServerId || ''];
     const currentProfile = claimedProfiles.find(p => p.server_id === activeServerId);
 
     const [channels, setChannels] = useState<Channel[]>([]);
@@ -22,7 +23,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
     const [aliasEdits, setAliasEdits] = useState<Record<string, string>>({});
 
     useEffect(() => {
-        if (!activeServerId) return;
+        if (!activeServerId || !serverUrl) return;
         Promise.all([
             fetch(`${serverUrl}/api/servers/${activeServerId}/categories`).then(r => r.json()),
             fetch(`${serverUrl}/api/servers/${activeServerId}/channels`).then(r => r.json()),
@@ -41,7 +42,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
 
     const handleCreateChannel = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newChannelName.trim() || !currentAccount || !activeServerId) return;
+        if (!newChannelName.trim() || !currentAccount || !activeServerId || !serverUrl) return;
         fetch(`${serverUrl}/api/servers/${activeServerId}/channels`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
@@ -59,7 +60,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
 
     const handleCreateCategory = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newCategoryName.trim() || !currentAccount || !activeServerId) return;
+        if (!newCategoryName.trim() || !currentAccount || !activeServerId || !serverUrl) return;
 
         fetch(`${serverUrl}/api/servers/${activeServerId}/categories`, {
             method: 'POST',
@@ -77,7 +78,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
     };
 
     const handleDeleteCategory = (categoryId: string) => {
-        if (!currentAccount) return;
+        if (!currentAccount || !serverUrl) return;
         fetch(`${serverUrl}/api/categories/${categoryId}`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id }
@@ -88,7 +89,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
     };
 
     const handleRenameCategory = (categoryId: string) => {
-        if (!currentAccount || !editingCategoryName.trim()) return;
+        if (!currentAccount || !editingCategoryName.trim() || !serverUrl) return;
         fetch(`${serverUrl}/api/categories/${categoryId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
@@ -106,7 +107,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
     };
 
     const handleSavePositions = () => {
-        if (!currentAccount || !activeServerId) return;
+        if (!currentAccount || !activeServerId || !serverUrl) return;
         fetch(`${serverUrl}/api/servers/${activeServerId}/reorder`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
@@ -117,7 +118,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
     };
 
     const handleSaveAlias = (profileId: string) => {
-        if (!currentAccount) return;
+        if (!currentAccount || !serverUrl) return;
         fetch(`${serverUrl}/api/profiles/${profileId}/aliases`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
