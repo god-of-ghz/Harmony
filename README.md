@@ -18,11 +18,11 @@ The server is distributed as a standalone executable (e.g., `harmony-server.exe`
 
 - Download the latest server release.
 - Run the executable on a machine you want to act as the host.
-- By default, the server runs on `http://localhost:3000`.
+- By default, the server runs on `http://localhost:3001`.
 
 **Connecting over the Internet:**
 To allow friends to connect to your server over the internet, you have two main options:
-1. **Port Forwarding:** Configure your router to forward port `3000` to the internal IP address of the machine running the server. You would then give your friends your public IP address.
+1. **Port Forwarding:** Configure your router to forward port `3001` to the internal IP address of the machine running the server. You would then give your friends your public IP address.
 2. **Tunnels/Proxies:** Use a service like ngrok, localtunnel, or Cloudflare Tunnels to securely expose your local server to the internet without changing router settings. They will provide a URL (like `https://my-harmony-server.ngrok.io`) that you give to your friends.
 
 ### 2. Connecting with a Client
@@ -32,7 +32,7 @@ The client is a standalone Windows application.
 - Open the application.
 - On the login/signup screen, click the **Settings** gear icon (usually top right).
 - In the "Server URL" field, enter the address of the server you wish to connect to.
-  - *Local testing:* `http://localhost:3000`
-  - *Remote server (Port Forwarded):* `http://<your-public-ip>:3000`
+  - *Local testing:* `http://localhost:3001`
+  - *Remote server (Port Forwarded):* `http://<your-public-ip>:3001`
   - *Remote server (Tunnel):* `https://<your-tunnel-url>`
 - Click Save. You can now create an account on that server and join the chat!
