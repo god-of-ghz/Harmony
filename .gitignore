@@ -38,9 +38,12 @@ Desktop.ini
 /server/node_modules/
 /server/dist/
 /backup_*/
+backup_*/
+backup_*
 *.txt
 *.json
 !package.json
 !tsconfig.json
 !package-lock.json
 *.db
+server/harmony.db
