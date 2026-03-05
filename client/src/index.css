@@ -1,0 +1,176 @@
+:root {
+  /* Discord-inspired Dark Theme Palette */
+  --bg-tertiary: #1e1f22;
+  /* Server sidebar */
+  --bg-secondary: #2b2d31;
+  /* Channel sidebar */
+  --bg-primary: #313338;
+  /* Main chat area */
+  --bg-message-hover: #2e3035;
+  --bg-modifier-hover: rgba(78, 80, 88, 0.48);
+  --bg-modifier-active: rgba(78, 80, 88, 0.6);
+  --bg-modifier-selected: rgba(78, 80, 88, 0.6);
+
+  --text-normal: #dbdee1;
+  --text-muted: #949ba4;
+  --text-link: #00a8fc;
+  --header-primary: #f2f3f5;
+  --header-secondary: #b5bac1;
+  --interactive-normal: #b5bac1;
+  --interactive-hover: #dbdee1;
+  --interactive-active: #fff;
+
+  --brand-experiment: #5865F2;
+  /* Discord blurple */
+  --brand-experiment-hover: #4752C4;
+
+  --divider: rgba(255, 255, 255, 0.06);
+
+  /* Layout Constants */
+  --server-sidebar-width: 72px;
+  --channel-sidebar-width: 240px;
+  --members-sidebar-width: 240px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-normal);
+  overflow: hidden;
+  line-height: 1.4;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Base Layout Classes */
+.app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Glassmorphism helpers for modals */
+.glass-panel {
+  background: rgba(30, 31, 34, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a1b1e;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #111214;
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4 {
+  color: var(--header-primary);
+  font-weight: 600;
+}
+
+a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Buttons */
+.btn {
+  background: var(--brand-experiment);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 14px;
+}
+
+.btn:hover {
+  background: var(--brand-experiment-hover);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+/* Inputs */
+.input-field {
+  background-color: var(--bg-tertiary);
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: 16px;
+  width: 100%;
+  outline: none;
+}
+
+.input-field::placeholder {
+  color: var(--text-muted);
+}
+
+/* User Avatars */
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: var(--header-primary);
+}
+
+/* Identifiers & Mentions */
+.mention-tag {
+  background-color: rgba(88, 101, 242, 0.3);
+  color: #c9cdfb;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.mention-tag:hover {
+  background-color: rgba(88, 101, 242, 1);
+  color: white;
+}
+
+.mentioned-message {
+  background-color: rgba(250, 166, 26, 0.1);
+  border-left: 2px solid #faa61a;
+}
