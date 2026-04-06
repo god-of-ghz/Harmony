@@ -15,7 +15,8 @@
   },
   "pkg": {
     "assets": [
-      "node_modules/sqlite3/build/Release/*.node"
+      "node_modules/sqlite3/build/Release/*.node",
+      "node_modules/mediasoup/worker/out/Release/mediasoup-worker.exe"
     ]
   },
   "keywords": [],

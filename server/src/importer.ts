@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Transform, pipeline } from 'stream';
 import { promisify } from 'util';
-import StreamArray from 'stream-json/src/streamers/stream-array';
+import StreamArray from '../node_modules/stream-json/src/streamers/stream-array.js';
 import dbManager from './database';
 
 const streamPipeline = promisify(pipeline);

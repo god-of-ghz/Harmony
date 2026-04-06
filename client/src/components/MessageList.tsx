@@ -24,6 +24,7 @@ interface MessageListProps {
     activeChannelId: string | null;
     onLoadMore: () => void;
     isLoadingMore: boolean;
+    currentProfileId?: string;
 }
 
 type ListItem = 
@@ -57,7 +58,8 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
     activeServerId,
     activeChannelId,
     onLoadMore,
-    isLoadingMore
+    isLoadingMore,
+    currentProfileId
 }, ref) => {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -135,7 +137,7 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
                 isGrouped={item.isGrouped}
                 showDaySeparator={false}
                 isMentioned={false} 
-                isAuthor={false}    
+                isAuthor={msg.author_id === currentProfileId}    
                 isEditing={isEditing}
                 editValue={editValue}
                 setEditValue={setEditValue}
@@ -166,7 +168,8 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         activeEmojiPickerId, 
         setActiveEmojiPickerId, 
         serverMap, 
-        activeServerId
+        activeServerId,
+        currentProfileId
     ]);
 
     return (

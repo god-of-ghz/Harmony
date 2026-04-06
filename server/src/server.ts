@@ -1,3 +1,4 @@
+import './setup';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import dbManager from './database';

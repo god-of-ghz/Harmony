@@ -315,7 +315,7 @@ export const ChatArea = () => {
                 activeChannelId={activeChannelId}
                 onLoadMore={handleLoadMore}
                 isLoadingMore={isLoadingMore}
-                currentAccountId={currentAccount?.id}
+                currentProfileId={currentProfile?.id}
             />
 
             <TypingIndicator 
