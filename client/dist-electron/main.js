@@ -1,24 +1,54 @@
-import { app as e, BrowserWindow as n } from "electron";
-import i from "path";
-import { fileURLToPath as a } from "url";
-const l = a(import.meta.url), s = i.dirname(l), t = process.env.NODE_ENV === "development";
-function r() {
-  const o = new n({
+import { app, ipcMain, desktopCapturer, BrowserWindow } from "electron";
+import path from "path";
+import { fileURLToPath } from "url";
+const __filename$1 = fileURLToPath(import.meta.url);
+const __dirname$1 = path.dirname(__filename$1);
+const isDev = process.env.NODE_ENV === "development";
+app.commandLine.appendSwitch("disable-features", "WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer");
+const userDataPath = process.env.HARMONY_USER_DATA_DIR;
+if (userDataPath) {
+  const absolutePath = path.isAbsolute(userDataPath) ? userDataPath : path.join(process.cwd(), userDataPath);
+  app.setPath("userData", absolutePath);
+}
+function createWindow() {
+  const win = new BrowserWindow({
     width: 1200,
     height: 800,
     title: "Harmony",
     webPreferences: {
-      nodeIntegration: !0,
-      contextIsolation: !1,
-      webSecurity: !1
+      nodeIntegration: true,
+      contextIsolation: false,
+      webSecurity: false
     }
   });
-  t || o.removeMenu(), t ? o.loadURL("http://localhost:5173") : o.loadFile(i.join(s, "../dist/index.html"));
+  if (!isDev) {
+    win.removeMenu();
+  }
+  if (isDev) {
+    win.loadURL("http://localhost:5173");
+  } else {
+    win.loadFile(path.join(__dirname$1, "../dist/index.html"));
+  }
 }
-e.whenReady().then(r);
-e.on("window-all-closed", () => {
-  process.platform !== "darwin" && e.quit();
+app.whenReady().then(() => {
+  ipcMain.handle("get-desktop-sources", async () => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ["screen"] });
+      return sources.map((s) => ({ id: s.id, name: s.name }));
+    } catch (e) {
+      console.error("Failed to get sources", e);
+      return [];
+    }
+  });
+  createWindow();
 });
-e.on("activate", () => {
-  n.getAllWindows().length === 0 && r();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });

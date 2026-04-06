@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "0.21.0-alpha",
+  "version": "0.3.0-alpha",
   "description": "",
   "main": "dist/server.js",
   "bin": "dist/server.js",

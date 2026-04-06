@@ -2,9 +2,9 @@
 
 Harmony is a privately hosted chat messaging service, intended as a competitor for Discord. 
 
-**Note: This project is currently in early alpha development. Latest Release: v0.21.0-alpha (April 2026)**
+**Note: This project is currently in early alpha development. Latest Release: v0.3 Alpha (April 2026)**
 
-## 🚀 Recent Changes (v0.21.0-alpha)
+## 🚀 Recent Changes (v0.3 Alpha)
 
 This release brings massive performance improvements, UI polishing, and expanded functionality!
 

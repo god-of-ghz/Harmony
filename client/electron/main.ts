@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, desktopCapturer, session, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -6,6 +6,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// Disable buggy Windows Graphics Capture (WGC) to prevent hr: -2147024891 E_ACCESSDENIED errors.
+// This forces Electron/WebRTC to fallback to the stable DXGI screen capture engine.
+app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer');
+
+// Support multiple isolated sessions by providing a custom user data directory via env var
+const userDataPath = process.env.HARMONY_USER_DATA_DIR;
+if (userDataPath) {
+    const absolutePath = path.isAbsolute(userDataPath) 
+        ? userDataPath 
+        : path.join(process.cwd(), userDataPath);
+    app.setPath('userData', absolutePath);
+}
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -32,7 +45,22 @@ function createWindow() {
     }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    // Handle screen share requests natively in Electron
+    ipcMain.handle('get-desktop-sources', async () => {
+        try {
+            const sources = await desktopCapturer.getSources({ types: ['screen'] });
+            return sources.map(s => ({ id: s.id, name: s.name }));
+        } catch (e) {
+            console.error("Failed to get sources", e);
+            return [];
+        }
+    });
+
+    createWindow();
+});
+
+
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
