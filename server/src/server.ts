@@ -1,13 +1,25 @@
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import * as baseDb from './database';
+import dbManager from './database';
 import { createApp } from './app';
 import { importDirectory, importDiscordJson } from './importer';
 import fs from 'fs';
 import path from 'path';
+import { startMediasoup } from './media/sfu';
+import { setupWebRTC } from './media/signaling';
+import { setupConnectionTracking } from './websocket';
 
 const importArgIndex = process.argv.indexOf('--import');
 const elevateArgIndex = process.argv.indexOf('--elevate');
+
+const portArgIndex = process.argv.indexOf('--port');
+const portArgValue = portArgIndex !== -1 ? process.argv[portArgIndex + 1] : null;
+const portEqualsArg = process.argv.find(arg => arg.startsWith('--port='));
+const portEqualsValue = portEqualsArg ? portEqualsArg.split('=')[1] : null;
+const isNumberArg = process.argv.slice(2).find(arg => !isNaN(Number(arg)) && arg.length >= 4);
+
+const PORT = portEqualsValue || portArgValue || isNumberArg || process.env.PORT || 3001;
+const isMock = process.argv.indexOf('--mock') !== -1;
 
 if (importArgIndex !== -1) {
     const targetPath = process.argv[importArgIndex + 1];
@@ -26,7 +38,7 @@ if (importArgIndex !== -1) {
                 await importDirectory(targetPath, serverName !== "Imported Server" ? serverName : path.basename(targetPath));
             } else {
                 const serverId = 'server-' + Date.now().toString();
-                await baseDb.runQuery(`INSERT OR IGNORE INTO servers (id, name, icon) VALUES (?, ?, ?)`, [serverId, serverName, '']);
+                await dbManager.initializeServerBundle(serverId, serverName, '');
                 await importDiscordJson(targetPath, serverId);
             }
             console.log("Import complete. You can now start the server normally.");
@@ -46,52 +58,90 @@ if (importArgIndex !== -1) {
     console.log(`Elevating account ${email}...`);
     setTimeout(async () => {
         try {
-            await baseDb.runQuery('UPDATE accounts SET is_creator = 1 WHERE email = ?', [email]);
-            console.log(`Successfully elevated ${email} to GLOBAL CREATOR.`);
+            await dbManager.runNodeQuery('UPDATE accounts SET is_creator = 1, is_admin = 1 WHERE email = ?', [email]);
+            console.log(`Successfully elevated ${email} to GLOBAL CREATOR and ADMIN.`);
             process.exit(0);
         } catch (e) {
             console.error(e);
             process.exit(1);
         }
     }, 500);
-
 } else {
     // --- STANDARD SERVER BOOT ---
-    const server = http.createServer();
-    const wss = new WebSocketServer({ server });
+    const startServer = async () => {
+        await startMediasoup().catch(console.error);
+        const server = http.createServer();
+        const wss = new WebSocketServer({ server });
 
-    const clients = new Set<WebSocket>();
+        const clients = new Set<WebSocket>();
 
-    wss.on('connection', (ws) => {
-        console.log('New WebSocket connection');
-        clients.add(ws);
+        const broadcastMessage = (data: any) => {
+            const payload = JSON.stringify(data);
+            clients.forEach((client) => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(payload);
+                }
+            });
+        };
 
-        ws.on('close', () => {
-            console.log('Connection closed');
-            clients.delete(ws);
+        wss.on('connection', (ws) => {
+            console.log('New WebSocket connection');
+            clients.add(ws);
+            setupWebRTC(ws as any);
+            setupConnectionTracking(ws, broadcastMessage);
+
+            ws.on('close', () => {
+                console.log('Connection closed');
+                clients.delete(ws);
+            });
         });
-    });
 
-    const broadcastMessage = (data: any) => {
-        const payload = JSON.stringify(data);
-        clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(payload);
+        if (isMock) {
+            // Seed logic
+            try {
+                const servers = await dbManager.getAllLoadedServers();
+                if (servers.length === 0) {
+                    console.log("Seeding initial mock server...");
+                    const serverId = 'mock-server-001';
+                    await dbManager.initializeServerBundle(serverId, "Harmony Mock Server", "");
+                    
+                    const categoryId = 'mock-cat-001';
+                    await dbManager.runServerQuery(serverId, 'INSERT INTO channel_categories (id, server_id, name, position) VALUES (?, ?, ?, ?)', [categoryId, serverId, 'Text Channels', 0]);
+                    
+                    const channelId = 'mock-chan-001';
+                    await dbManager.runServerQuery(serverId, 'INSERT INTO channels (id, server_id, category_id, name, type, position) VALUES (?, ?, ?, ?, ?, ?)', [channelId, serverId, categoryId, 'general', 'text', 0]);
+                    console.log("Mock server seeded: 'Harmony Mock Server'");
+                }
+
+                const users = await dbManager.allNodeQuery('SELECT id FROM accounts');
+                if (users.length === 0) {
+                    console.log("Seeding mock admin account...");
+                    const userId = 'mock-admin-id';
+                    const email = 'admin@harmony.local';
+                    const pass = 'password123';
+                    const auth_verifier = 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f3883d4473e94f'; // sha256('password123')
+                    // Mock keys (base64)
+                    const pub = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq8G5...'; 
+                    const enc = '...'; 
+                    await dbManager.runNodeQuery(
+                        `INSERT INTO accounts (id, email, auth_verifier, public_key, encrypted_private_key, key_salt, key_iv, is_creator, is_admin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [userId, email, auth_verifier, pub, enc, 'salt', 'iv', 1, 1]
+                    );
+                    console.log(`Mock admin seeded: ${email} / ${pass}`);
+                }
+            } catch (e) {
+                console.error("Failed to seed mock data:", e);
             }
+        }
+
+        const app = createApp(dbManager, broadcastMessage);
+        server.on('request', app);
+
+        server.listen(PORT as number, '0.0.0.0', () => {
+            console.log(`Server is running and accessible at http://localhost:${PORT}`);
+            if (isMock) console.log("Mock mode is enabled. Use admin@harmony.local / password123 to login.");
         });
     };
 
-    const app = createApp(baseDb, broadcastMessage);
-    server.on('request', app);
-
-    const portArgIndex = process.argv.indexOf('--port');
-    const portArgValue = portArgIndex !== -1 ? process.argv[portArgIndex + 1] : null;
-    const portEqualsArg = process.argv.find(arg => arg.startsWith('--port='));
-    const portEqualsValue = portEqualsArg ? portEqualsArg.split('=')[1] : null;
-
-    const PORT = portEqualsValue || portArgValue || process.env.PORT || 3001;
-
-    server.listen(PORT as number, '0.0.0.0', () => {
-        console.log(`Server is running and accessible at http://localhost:${PORT}`);
-    });
+    startServer();
 }

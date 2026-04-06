@@ -25,13 +25,19 @@ vi.mock('../src/components/ClaimProfile', () => ({
 vi.mock('../src/components/LoginSignup', () => ({
     LoginSignup: () => <div data-testid="login-signup" />
 }));
+vi.mock('../src/components/DMSidebar', () => ({
+    DMSidebar: () => <div data-testid="dm-sidebar" />
+}));
 
 describe('App Component Layout', () => {
     it('renders LoginSignup if no current user', () => {
         (useAppStore as any).mockReturnValue({
             currentAccount: null,
             activeServerId: null,
-            claimedProfiles: []
+            claimedProfiles: [],
+            knownServers: ['http://localhost:3001'],
+            trustedServers: [],
+            isGuestSession: false
         });
 
         render(<App />);
@@ -43,7 +49,10 @@ describe('App Component Layout', () => {
         (useAppStore as any).mockReturnValue({
             currentAccount: { id: '1' },
             activeServerId: null,
-            claimedProfiles: []
+            claimedProfiles: [],
+            knownServers: ['http://localhost:3001'],
+            trustedServers: [],
+            isGuestSession: false
         });
 
         render(<App />);
@@ -56,7 +65,10 @@ describe('App Component Layout', () => {
         (useAppStore as any).mockReturnValue({
             currentAccount: { id: '1' },
             activeServerId: 'srv1',
-            claimedProfiles: []
+            claimedProfiles: [],
+            knownServers: ['http://localhost:3001'],
+            trustedServers: [],
+            isGuestSession: false
         });
 
         render(<App />);
@@ -67,7 +79,10 @@ describe('App Component Layout', () => {
         (useAppStore as any).mockReturnValue({
             currentAccount: { id: '1' },
             activeServerId: 'srv1',
-            claimedProfiles: [{ server_id: 'srv1' }]
+            claimedProfiles: [{ server_id: 'srv1' }],
+            knownServers: ['http://localhost:3001'],
+            trustedServers: [],
+            isGuestSession: false
         });
 
         render(<App />);
@@ -79,7 +94,10 @@ describe('App Component Layout', () => {
         (useAppStore as any).mockReturnValue({
             currentAccount: { id: '1' },
             activeServerId: 'srv1',
-            claimedProfiles: [{ server_id: 'srv1' }]
+            claimedProfiles: [{ server_id: 'srv1' }],
+            knownServers: ['http://localhost:3001'],
+            trustedServers: [],
+            isGuestSession: false
         });
 
         const { container } = render(<App />);

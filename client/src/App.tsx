@@ -1,17 +1,44 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from './store/appStore';
 import { ServerSidebar } from './components/ServerSidebar';
 import { ChannelSidebar } from './components/ChannelSidebar';
 import { ChatArea } from './components/ChatArea';
 import { ClaimProfile } from './components/ClaimProfile';
 import { LoginSignup } from './components/LoginSignup';
+import { DMSidebar } from './components/DMSidebar';
+import { FriendsList } from './components/FriendsList';
 
 function App() {
-  const { currentAccount, activeServerId, claimedProfiles, isGuestSession, knownServers, setCurrentAccount, setIsGuestSession } = useAppStore();
+  const { currentAccount, activeServerId, activeChannelId, claimedProfiles, isGuestSession, knownServers, trustedServers, setCurrentAccount, setIsGuestSession } = useAppStore();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeEmail, setUpgradeEmail] = useState('');
   const [upgradePassword, setUpgradePassword] = useState('');
   const [upgradeError, setUpgradeError] = useState('');
+
+  // Hydrate trusted servers and read states on boot from cached account
+  useEffect(() => {
+    if (currentAccount) {
+      if (currentAccount.trusted_servers) {
+        useAppStore.getState().setTrustedServers(currentAccount.trusted_servers);
+      }
+      
+      const homeServer = knownServers[0] || trustedServers[0];
+      if (homeServer) {
+        fetch(`${homeServer}/api/read_states`, {
+          headers: { 'X-Account-Id': currentAccount.id }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (Array.isArray(data)) {
+                const map: any = {};
+                data.forEach(s => map[s.channel_id] = s.last_message_id);
+                useAppStore.getState().setReadStates(map);
+            }
+        })
+        .catch(console.error);
+      }
+    }
+  }, [currentAccount]);
 
   if (!currentAccount) {
     return <LoginSignup />;
@@ -43,7 +70,7 @@ function App() {
     : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%' }}>
       {isGuestSession && (
         <div style={{ backgroundColor: 'var(--brand-experiment)', padding: '8px', textAlign: 'center', color: 'white', fontSize: '14px', fontWeight: 'bold' }}>
           You are currently using a guest account. Your data may be lost if you clear your browser data.
@@ -62,6 +89,11 @@ function App() {
               <ChatArea />
             </>
           )
+        ) : activeServerId === '' ? (
+          <>
+            <DMSidebar />
+            {activeChannelId ? <ChatArea /> : <FriendsList />}
+          </>
         ) : (
           <div style={{ flex: 1, backgroundColor: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             Select a Server

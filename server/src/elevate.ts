@@ -1,4 +1,4 @@
-import { runQuery } from './database';
+import dbManager from './database';
 
 const email = process.argv[2];
 
@@ -9,11 +9,11 @@ if (!email) {
 
 const elevate = async () => {
     try {
-        await runQuery('UPDATE accounts SET is_creator = 1 WHERE email = ?', [email]);
-        console.log(`Successfully elevated ${email} to GLOBAL CREATOR.`);
+        await dbManager.runNodeQuery('UPDATE accounts SET is_creator = 1, is_admin = 1 WHERE email = ?', [email]);
+        console.log(`Successfully elevated ${email} to GLOBAL CREATOR and ADMIN.`);
     } catch (e) {
         console.error(e);
     }
 };
 
-elevate();
+setTimeout(elevate, 500);

@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import { importDirectory, importDiscordJson } from './importer';
-import db, { runQuery } from './database';
+import dbManager from './database';
 
 const targetPath = process.argv[2];
 if (!targetPath) {
@@ -20,7 +20,7 @@ const main = async () => {
             } else {
                 const serverName = process.argv[3] || "Imported Server";
                 const serverId = 'server-' + Date.now().toString();
-                await runQuery(`INSERT OR IGNORE INTO servers (id, name, icon) VALUES (?, ?, ?)`, [serverId, serverName, '']);
+                await dbManager.initializeServerBundle(serverId, serverName, '');
                 await importDiscordJson(targetPath, serverId);
             }
             console.log("Import complete. You can now start the server.");

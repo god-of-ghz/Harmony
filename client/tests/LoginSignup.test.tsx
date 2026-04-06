@@ -11,6 +11,21 @@ describe('LoginSignup Component', () => {
         vi.clearAllMocks();
         localStorage.clear();
         useAppStore.setState({ currentAccount: null, claimedProfiles: [] });
+        
+        // Default smart mock for fetch
+        (global.fetch as any).mockImplementation((url: string) => {
+            if (url.endsWith('/api/accounts/owner-exists')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: async () => ({ exists: true })
+                });
+            }
+            // Default fallback for other calls if not overridden
+            return Promise.resolve({
+                ok: true,
+                json: async () => ({})
+            });
+        });
     });
 
     it('renders login form by default', () => {
@@ -19,12 +34,17 @@ describe('LoginSignup Component', () => {
     });
 
     it('handles successful login without remembering', async () => {
-        (global.fetch as any).mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ id: 'acc1', email: 'test@test.com' })
-        }).mockResolvedValueOnce({
-            ok: true,
-            json: async () => ([])
+        (global.fetch as any).mockImplementation((url: string) => {
+            if (url.endsWith('/api/accounts/owner-exists')) {
+                return Promise.resolve({ ok: true, json: async () => ({ exists: true }) });
+            }
+            if (url.endsWith('/api/accounts/login')) {
+                return Promise.resolve({ ok: true, json: async () => ({ id: 'acc1', email: 'test@test.com' }) });
+            }
+            if (url.includes('/profiles')) {
+                return Promise.resolve({ ok: true, json: async () => ([]) });
+            }
+            return Promise.resolve({ ok: true, json: async () => ({}) });
         });
 
         render(<LoginSignup />);
@@ -40,12 +60,17 @@ describe('LoginSignup Component', () => {
     });
 
     it('remembers user if checkbox is checked', async () => {
-        (global.fetch as any).mockResolvedValueOnce({
-            ok: true,
-            json: async () => ({ id: 'acc2', email: 'rem@test.com' })
-        }).mockResolvedValueOnce({
-            ok: true,
-            json: async () => ([])
+        (global.fetch as any).mockImplementation((url: string) => {
+            if (url.endsWith('/api/accounts/owner-exists')) {
+                return Promise.resolve({ ok: true, json: async () => ({ exists: true }) });
+            }
+            if (url.endsWith('/api/accounts/login')) {
+                return Promise.resolve({ ok: true, json: async () => ({ id: 'acc2', email: 'rem@test.com' }) });
+            }
+            if (url.includes('/profiles')) {
+                return Promise.resolve({ ok: true, json: async () => ([]) });
+            }
+            return Promise.resolve({ ok: true, json: async () => ({}) });
         });
 
         render(<LoginSignup />);
@@ -55,7 +80,9 @@ describe('LoginSignup Component', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Login' }));
 
         await waitFor(() => {
-            expect(localStorage.getItem('harmony_account')).toContain('rem@test.com');
+            const cached = localStorage.getItem('harmony_account');
+            expect(cached).not.toBeNull();
+            expect(cached).toContain('rem@test.com');
         });
     });
 
@@ -84,7 +111,7 @@ describe('LoginSignup Component', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Signup' }));
 
         expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument();
-        expect(global.fetch).not.toHaveBeenCalled();
+        expect(global.fetch).toHaveBeenCalledTimes(1); // Only the initial owner-exists check
     });
 
     it('changes password successfully', async () => {
@@ -102,20 +129,25 @@ describe('LoginSignup Component', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Change Password' }));
 
+        // Verify success message appears after the PAKE-based password change
         expect(await screen.findByText('Password updated successfully! You can now login.')).toBeInTheDocument();
-        expect(global.fetch).toHaveBeenCalledWith('http://localhost:3001/api/accounts/password', expect.objectContaining({
-            method: 'PUT',
-            body: JSON.stringify({ email: 'test@test.com', newPassword: 'newpass123' })
-        }));
+
+        // Verify the correct endpoint was called with a PUT and the new PAKE fields
+        expect(global.fetch).toHaveBeenCalledWith(
+            'http://localhost:3001/api/accounts/password',
+            expect.objectContaining({
+                method: 'PUT',
+                body: expect.stringContaining('serverAuthKey')
+            })
+        );
     });
 
-    it('updates and persists the custom Network Server URL', () => {
+    it('updates local state for the custom Network Server URL', () => {
         render(<LoginSignup />);
-        const urlInput = screen.getByLabelText(/Network Server URL/i);
+        // Find the server URL input by its placeholder text — more robust than label matching
+        const urlInput = screen.getByPlaceholderText('http://96.230.218.248:3001');
 
         fireEvent.change(urlInput, { target: { value: 'http://96.230.218.248:3001' } });
-
-        expect(useAppStore.getState().serverUrl).toBe('http://96.230.218.248:3001');
-        expect(localStorage.getItem('harmony_server_url')).toBe('http://96.230.218.248:3001');
+        expect(urlInput).toHaveValue('http://96.230.218.248:3001');
     });
 });

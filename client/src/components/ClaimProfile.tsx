@@ -9,17 +9,27 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [freshName, setFreshName] = useState('');
+    const [error, setError] = useState('');
     const [isFreshStart, setIsFreshStart] = useState(isGuestSession);
 
     useEffect(() => {
         if (!serverUrl) return;
+        setLoading(true);
         fetch(`${serverUrl}/api/servers/${serverId}/profiles`)
             .then(res => res.json())
             .then(data => {
-                setProfiles(data);
+                if (Array.isArray(data)) {
+                    setProfiles(data);
+                } else if (data.error) {
+                    setError(data.error);
+                }
                 setLoading(false);
             })
-            .catch(console.error);
+            .catch(err => {
+                console.error(err);
+                setError('Failed to connect to server');
+                setLoading(false);
+            });
     }, [serverId, serverUrl]);
 
     const handleClaim = (profileId: string) => {
@@ -36,9 +46,14 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
                     if (profile) {
                         addClaimedProfile({ ...profile, account_id: currentAccount.id });
                     }
+                } else {
+                    setError(result.error || 'Failed to claim profile');
                 }
             })
-            .catch(console.error);
+            .catch(err => {
+                console.error(err);
+                setError('Network error while claiming profile');
+            });
     };
 
     const handleFreshStart = (e: React.FormEvent) => {
@@ -50,11 +65,18 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ accountId: currentAccount.id, nickname: freshName, isGuest: isGuestSession })
         })
-            .then(res => res.json())
+            .then(async res => {
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to join server');
+                return data;
+            })
             .then(newProfile => {
                 addClaimedProfile(newProfile);
             })
-            .catch(console.error);
+            .catch(err => {
+                console.error(err);
+                setError(err.message || 'Network error while joining server');
+            });
     };
 
     if (loading) {
@@ -69,6 +91,12 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
             <div className="glass-panel" style={{ padding: '32px', borderRadius: '12px', width: '450px', maxWidth: '90%' }}>
                 <h2 style={{ textAlign: 'center', marginBottom: '8px', color: 'var(--text-normal)' }}>Join Server</h2>
                 <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '24px' }}>Claim your old Discord identity or start fresh.</p>
+
+                {error && (
+                    <div style={{ color: '#ed4245', marginBottom: '16px', fontSize: '13px', padding: '8px', backgroundColor: 'rgba(237, 66, 69, 0.1)', border: '1px solid rgba(237, 66, 69, 0.4)', borderRadius: '4px' }}>
+                        {error}
+                    </div>
+                )}
 
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                     {!isGuestSession && (
@@ -120,8 +148,10 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
                 ) : (
                     <form onSubmit={handleFreshStart} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <label style={{ fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Choose a Nickname</label>
+                            <label htmlFor="fresh-nickname" style={{ fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Choose a Nickname</label>
                             <input
+                                id="fresh-nickname"
+                                data-testid="fresh-nickname"
                                 type="text"
                                 value={freshName}
                                 onChange={e => setFreshName(e.target.value)}

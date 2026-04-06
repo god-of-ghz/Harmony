@@ -2,7 +2,30 @@
 
 Harmony is a privately hosted chat messaging service, intended as a competitor for Discord. 
 
-**Note: This project is currently in early alpha development.**
+**Note: This project is currently in early alpha development. Latest Release: v0.21.0-alpha (April 2026)**
+
+## 🚀 Recent Changes (v0.21.0-alpha)
+
+This release brings massive performance improvements, UI polishing, and expanded functionality!
+
+### ⚡ Performance & Scalability
+- **Zero-Lag Chat History**: Implemented full virtualization using `react-virtuoso`. The chat now handles 10,000+ messages with zero performance impact.
+- **Optimized State Management**: Decoupled message list rendering from high-frequency typing updates, ensuring the app stays responsive even in the busiest channels.
+- **Database Scaling**: Optimized the Discord server importer for massive JSON files with intelligent transaction batching.
+
+### ✨ Premium UI Experience
+- **Discord-like Replies**: Added a beautiful reply system with avatars, message previews, and smooth curved connector lines.
+- **Inline Emoji Autocomplete**: Type `:EMOJI_NAME:` to see suggestions and press Tab to autocomplete instantly!
+- **Smooth Animations**: Refined typing indicators and scroll-snapping for a more fluid feel.
+
+### 🎥 Media & Communication
+- **Restored Screen Sharing**: Fixed WGC permission issues in Electron and WebRTC signaling race conditions for a much more stable streaming experience.
+- **Improved Video UI**: Re-engineered the video overlay and control bar to prevent layout shifts.
+
+### 🛠️ Functionality & Admin
+- **Smart Server Ownership**: The first user to register on any new Harmony server is automatically elevated to "Creator" and "Admin" status.
+- **Developer Workflow**: Added `dev_login.bat` to launch two isolated Harmony clients for instant multi-user testing.
+- **Reliable User Profiles**: Fixed synchronization bugs where users would sometimes appear as "Unknown" to others.
 
 ## Architecture
 
@@ -36,3 +59,4 @@ The client is a standalone Windows application.
   - *Remote server (Port Forwarded):* `http://<your-public-ip>:3001`
   - *Remote server (Tunnel):* `https://<your-tunnel-url>`
 - Click Save. You can now create an account on that server and join the chat!
+

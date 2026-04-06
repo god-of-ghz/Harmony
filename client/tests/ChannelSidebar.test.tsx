@@ -1,0 +1,102 @@
+/// <reference types="@testing-library/jest-dom" />
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ChannelSidebar } from '../src/components/ChannelSidebar';
+import { useAppStore } from '../src/store/appStore';
+
+// Mock fetch
+global.fetch = vi.fn();
+
+// Mock Zustand store
+vi.mock('../src/store/appStore', () => ({
+    useAppStore: vi.fn(),
+    Permission: {
+        ADMINISTRATOR: 1 << 0,
+        MANAGE_SERVER: 1 << 1,
+        MANAGE_ROLES: 1 << 2,
+        MANAGE_CHANNELS: 1 << 3,
+        SEND_MESSAGES: 1 << 7,
+        VIEW_CHANNEL: 1 << 10
+    }
+}));
+
+describe('ChannelSidebar Component', () => {
+    const mockSetActiveChannelId = vi.fn();
+    const mockSetCurrentUserPermissions = vi.fn();
+
+    const mockState = {
+        activeServerId: 's1',
+        activeChannelId: 'c1',
+        setActiveChannelId: mockSetActiveChannelId,
+        serverMap: { 's1': 'http://localhost:3001' },
+        activeVoiceChannelId: null,
+        setActiveVoiceChannelId: vi.fn(),
+        unreadChannels: new Set(['c2']),
+        currentUserPermissions: 0,
+        setCurrentUserPermissions: mockSetCurrentUserPermissions,
+        currentAccount: { id: 'account1', is_creator: true },
+        claimedProfiles: []
+    };
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (useAppStore as any).mockReturnValue(mockState);
+        (useAppStore as any).getState = () => mockState;
+        
+        (global.fetch as any).mockImplementation((url: string) => {
+            if (url.includes('/categories')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve([{ id: 'cat1', name: 'TEXT CHANNELS', server_id: 's1', position: 0 }])
+                });
+            }
+            if (url.includes('/channels')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve([
+                        { id: 'c1', name: 'general', server_id: 's1', category_id: 'cat1' },
+                        { id: 'c2', name: 'random', server_id: 's1', category_id: 'cat1' }
+                    ])
+                });
+            }
+            if (url.includes('/roles')) {
+                return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+            }
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+    });
+
+    it('groups channels under categories correctly', async () => {
+        render(<ChannelSidebar />);
+
+        await waitFor(() => {
+            expect(screen.getByText('TEXT CHANNELS')).toBeInTheDocument();
+            expect(screen.getByText('general')).toBeInTheDocument();
+            expect(screen.getByText('random')).toBeInTheDocument();
+        });
+    });
+
+    it('handles channel navigation on click', async () => {
+        render(<ChannelSidebar />);
+
+        await waitFor(() => {
+            const channelLink = screen.getByText('random');
+            fireEvent.click(channelLink);
+            expect(mockSetActiveChannelId).toHaveBeenCalledWith('c2', 'random');
+        });
+    });
+
+    it('shows unread indicator for channels in unreadChannels set', async () => {
+        render(<ChannelSidebar />);
+
+        await waitFor(() => {
+            const unreadChannel = screen.getByText('random');
+            // Check for bold font weight as indicator (as implemented in code)
+            expect(unreadChannel).toHaveStyle('font-weight: bold');
+        });
+        
+        // Assert current channel is NOT bold
+        const selectedChannel = screen.getByText('general');
+        expect(selectedChannel).not.toHaveStyle('font-weight: bold');
+    });
+});
