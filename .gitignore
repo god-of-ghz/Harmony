@@ -21,7 +21,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Testing
-/coverage
+coverage/
 
 # TypeScript
 *.tsbuildinfo
@@ -32,14 +32,11 @@ ehthumbs.db
 Desktop.ini
 
 # Project specific
-/client/node_modules/
-/client/dist/
-/client/release/
-/server/node_modules/
-/server/dist/
-/backup_*/
+node_modules/
+dist/
+build/
+releases/
 backup_*/
-backup_*
 *.txt
 *.json
 !package.json
@@ -48,12 +45,20 @@ backup_*
 *.db
 server/harmony.db
 client/userData*
-releases/
-server/release/
-scratch_*.js
-server/test_*.js
 *.log
 server/data/
 server/system_test_data/servers/
 *.pem
 client/test_electron.js
+
+
+# Agent artifacts
+.agent/
+brain/
+*prompts.md
+implementation_plan_*.md
+harmony_refactor_*.md
+SERVERSAVER_EXPORT_SPEC.md
+scratch_*.js
+assess_coverage.js
+test_attach.txt
