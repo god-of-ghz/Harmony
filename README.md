@@ -16,6 +16,10 @@ This massive update revolves around data independence and server migration! Brin
 ### ✨ Advanced Identity Systems
 - **Global & Guild Profiles:** You're no longer limited to a single name! We implemented a flexible identity model allowing distinct display names and avatars on a per-guild basis, while maintaining a reliable unified global profile fallback.
 
+### 🔒 Security & Privacy (E2EE)
+- **End-to-End Encryption:** Your messages stay exclusively yours. Harmony now features full client-side E2EE message payload encryption using ECDH (Elliptic-curve Diffie–Hellman) for key exchange and AES-GCM for secure data wrapping.
+- **Native HTTPS & WSS:** The Harmony scalable backend inherently detects and supports `cert.pem` and `key.pem` configurations to enforce strict TLS over API requests and active WebSocket connections.
+
 ### ⚡ UI/UX Polish & Client Reliability
 - **Client State Persistence:** You won't get lost anymore! The Harmony app now saves your active navigation path — automatically dropping you into your last-visited guild and channel upon login or refresh.
 - **Smooth Lazy-Loading:** Virtualized list rendering for older messages when scrolling upward is completely fixed. No more jerky movements or sudden snapbacks when catching up on history!
