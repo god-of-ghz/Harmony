@@ -36,6 +36,7 @@ export const MentionAutocomplete: React.FC<MentionAutocompleteProps> = ({ option
                 return (
                     <div
                         key={option.id}
+                        data-testid="mention-option"
                         style={{
                             padding: '8px 12px',
                             cursor: 'pointer',
@@ -60,14 +61,16 @@ export const MentionAutocomplete: React.FC<MentionAutocompleteProps> = ({ option
                                 {name.substring(0, 2).toUpperCase()}
                             </div>
                         )}
-                        <span style={{ fontWeight: isRole ? 'bold' : 'normal' }}>
-                            {isRole ? `@${name}` : name}
-                        </span>
-                        {!isRole && (option as Profile).original_username && (
-                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                                @{(option as Profile).original_username}
+                        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                            <span style={{ fontWeight: isRole ? 'bold' : '600', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {isRole ? `@${name}` : name}
                             </span>
-                        )}
+                            {!isRole && (option as Profile).original_username && (
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-2px' }}>
+                                    @{(option as Profile).original_username}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 );
             })}

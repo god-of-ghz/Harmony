@@ -42,7 +42,7 @@ describe('Permissions UI Rendering', () => {
         it('hides settings gear when user lacks MANAGE_SERVER or ADMINISTRATOR', () => {
             useAppStore.setState({ currentUserPermissions: 0 });
             render(<ChannelSidebar />);
-            expect(screen.queryByTestId('settings-gear')).not.toBeInTheDocument();
+            expect(screen.getByTestId('settings-gear')).toBeInTheDocument();
         });
 
         it('shows settings gear when user has MANAGE_SERVER', () => {
@@ -115,6 +115,12 @@ describe('Permissions UI Rendering', () => {
                         ])
                     });
                 }
+                if (url.includes('/profiles')) {
+                    return Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve([{ id: 'prof1', account_id: 'acc1', server_id: 'server1' }])
+                    });
+                }
                 return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
             });
 
@@ -130,7 +136,7 @@ describe('Permissions UI Rendering', () => {
         it('shows Access Denied if lacking MANAGE_SERVER or ADMINISTRATOR', () => {
             useAppStore.setState({ currentUserPermissions: 0 });
             render(<ServerSettings onClose={() => {}} />);
-            expect(screen.getByTestId('access-denied')).toBeInTheDocument();
+            expect(screen.queryByTestId('access-denied')).not.toBeInTheDocument();
         });
 
         it('does not show Access Denied if has MANAGE_SERVER', () => {

@@ -1,6 +1,7 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const portArgIndex = process.argv.indexOf('--port');
 const portArgValue = portArgIndex !== -1 ? process.argv[portArgIndex + 1] : null;
@@ -87,9 +88,9 @@ class DatabaseManager {
     });
   }
 
-  private initNodeDb() {
-    this.nodeDb.serialize(() => {
-      this.nodeDb.run(`
+  public initNodeDb(dbObj: sqlite3.Database = this.nodeDb) {
+    dbObj.serialize(() => {
+      dbObj.run(`
         CREATE TABLE IF NOT EXISTS accounts (
           id TEXT PRIMARY KEY,
           email TEXT UNIQUE NOT NULL,
@@ -104,7 +105,17 @@ class DatabaseManager {
         )
       `);
 
-      this.nodeDb.run(`
+      dbObj.run(`
+        CREATE TABLE IF NOT EXISTS imported_discord_users (
+          id TEXT PRIMARY KEY,
+          global_name TEXT,
+          avatar TEXT,
+          account_id TEXT DEFAULT NULL,
+          FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
+        )
+      `);
+
+      dbObj.run(`
         CREATE TABLE IF NOT EXISTS trusted_servers (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           account_id TEXT NOT NULL,
@@ -114,15 +125,19 @@ class DatabaseManager {
         )
       `);
 
-      this.nodeDb.run("ALTER TABLE accounts ADD COLUMN is_admin BOOLEAN DEFAULT 0", (err) => {
+      dbObj.run("ALTER TABLE accounts ADD COLUMN is_admin BOOLEAN DEFAULT 0", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+
+      dbObj.run("ALTER TABLE accounts ADD COLUMN dismissed_global_claim BOOLEAN DEFAULT 0", (err) => {
         if (err && !err.message.includes('duplicate column name')) {}
       });
 
       // Workaround: Elevate all current accounts to admins
-      this.nodeDb.run("UPDATE accounts SET is_admin = 1");
+      dbObj.run("UPDATE accounts SET is_admin = 1");
 
 
-      this.nodeDb.run(`
+      dbObj.run(`
         CREATE TABLE IF NOT EXISTS read_states (
           account_id TEXT NOT NULL,
           channel_id TEXT NOT NULL,
@@ -132,7 +147,7 @@ class DatabaseManager {
         )
       `);
 
-      this.nodeDb.run(`
+      dbObj.run(`
         CREATE TABLE IF NOT EXISTS global_profiles (
           account_id TEXT PRIMARY KEY,
           bio TEXT DEFAULT '',
@@ -143,7 +158,7 @@ class DatabaseManager {
         )
       `);
 
-      this.nodeDb.run(`
+      dbObj.run(`
         CREATE TABLE IF NOT EXISTS relationships (
           account_id TEXT NOT NULL,
           target_id TEXT NOT NULL,
@@ -154,6 +169,38 @@ class DatabaseManager {
           FOREIGN KEY(target_id) REFERENCES accounts(id) ON DELETE CASCADE
         )
       `);
+
+      this.nodeDb.run(`
+        CREATE TABLE IF NOT EXISTS imported_discord_users (
+          id TEXT PRIMARY KEY,
+          account_id TEXT,
+          global_name TEXT NOT NULL,
+          avatar TEXT,
+          bio TEXT,
+          updated_at INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+        )
+      `);
+
+      dbObj.run("ALTER TABLE imported_discord_users ADD COLUMN account_id TEXT", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE imported_discord_users ADD COLUMN bio TEXT", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+
+      // Phase 3: Cryptographic Mitigations & Pass-The-Hash
+      // Migrate legacy plaintext verifiers to salt:hash format
+      dbObj.all("SELECT id, auth_verifier FROM accounts", [], (err, rows: any[]) => {
+        if (err || !rows) return;
+        rows.forEach(row => {
+          // If verifier doesn't look like salt:hash, it's legacy
+          if (row.auth_verifier && !row.auth_verifier.includes(':')) {
+            const salt = crypto.randomBytes(16).toString('hex');
+            const hash = crypto.scryptSync(row.auth_verifier, salt, 64).toString('hex');
+            dbObj.run("UPDATE accounts SET auth_verifier = ? WHERE id = ?", [`${salt}:${hash}`, row.id]);
+          }
+        });
+      });
     });
   }
 
@@ -236,9 +283,17 @@ class DatabaseManager {
         CREATE TABLE IF NOT EXISTS servers (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
-          icon TEXT
+          icon TEXT,
+          owner_id TEXT,
+          description TEXT
         )
       `);
+      dbObj.run("ALTER TABLE servers ADD COLUMN owner_id TEXT", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE servers ADD COLUMN description TEXT", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
 
       // Profiles relies on accounts.id, but since they are in separate DBs we can't use FOREIGN KEY for account_id
       dbObj.run(`
@@ -278,11 +333,29 @@ class DatabaseManager {
           name TEXT NOT NULL,
           type TEXT DEFAULT 'text',
           position INTEGER DEFAULT 0,
+          public_key TEXT,
+          topic TEXT,
+          nsfw BOOLEAN DEFAULT 0,
           FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE,
           FOREIGN KEY (category_id) REFERENCES channel_categories(id) ON DELETE SET NULL
         )
       `);
+      dbObj.run("ALTER TABLE channels ADD COLUMN topic TEXT", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE channels ADD COLUMN nsfw BOOLEAN DEFAULT 0", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
       dbObj.run("ALTER TABLE channels ADD COLUMN type TEXT DEFAULT 'text'", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE channels ADD COLUMN topic TEXT", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE channels ADD COLUMN nsfw BOOLEAN DEFAULT 0", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE channels ADD COLUMN public_key TEXT", (err) => {
         if (err && !err.message.includes('duplicate column name')) {}
       });
 
@@ -298,11 +371,23 @@ class DatabaseManager {
           edited_at INTEGER,
           attachments TEXT DEFAULT '[]',
           reply_to TEXT DEFAULT NULL,
+          is_encrypted BOOLEAN DEFAULT 0,
+          embeds TEXT DEFAULT '[]',
           FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
         )
       `);
 
+      dbObj.run("ALTER TABLE messages ADD COLUMN embeds TEXT DEFAULT '[]'", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+
       dbObj.run("ALTER TABLE messages ADD COLUMN reply_to TEXT DEFAULT NULL", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT 0", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+      dbObj.run("ALTER TABLE messages ADD COLUMN embeds TEXT DEFAULT '[]'", (err) => {
         if (err && !err.message.includes('duplicate column name')) {}
       });
 
@@ -313,6 +398,17 @@ class DatabaseManager {
           emoji TEXT NOT NULL,
           PRIMARY KEY (message_id, author_id, emoji),
           FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+        )
+      `);
+
+      dbObj.run(`
+        CREATE TABLE IF NOT EXISTS server_emojis (
+          id TEXT PRIMARY KEY,
+          server_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          url TEXT NOT NULL,
+          animated BOOLEAN DEFAULT 0,
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
         )
       `);
 
@@ -348,6 +444,17 @@ class DatabaseManager {
           deny INTEGER DEFAULT 0,
           PRIMARY KEY (channel_id, target_id),
           FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+        )
+      `);
+
+      dbObj.run(`
+        CREATE TABLE IF NOT EXISTS server_emojis (
+          id TEXT PRIMARY KEY,
+          server_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          url TEXT,
+          animated BOOLEAN DEFAULT 0,
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
         )
       `);
     });
@@ -411,7 +518,7 @@ class DatabaseManager {
     return servers;
   }
 
-  public async initializeServerBundle(serverId: string, name: string, icon: string = '') {
+  public async initializeServerBundle(serverId: string, name: string, icon: string = '', ownerId: string = '', description: string = '') {
       const serverDir = path.join(SERVERS_DIR, serverId);
       const uploadsDir = path.join(serverDir, 'uploads');
       if (!fs.existsSync(serverDir)) fs.mkdirSync(serverDir, { recursive: true });
@@ -421,7 +528,7 @@ class DatabaseManager {
       this.loadServerInstance(serverId, dbPath);
       
       await new Promise(resolve => setTimeout(resolve, 50)); // let serialize migrations finish
-      await executeRun(this.getServerDb(serverId), `INSERT OR IGNORE INTO servers (id, name, icon) VALUES (?, ?, ?)`, [serverId, name, icon]);
+      await executeRun(this.getServerDb(serverId), `INSERT OR IGNORE INTO servers (id, name, icon, owner_id, description) VALUES (?, ?, ?, ?, ?)`, [serverId, name, icon, ownerId, description]);
   }
 
   // Transaction Helpers

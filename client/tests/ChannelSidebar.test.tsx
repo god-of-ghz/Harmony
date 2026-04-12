@@ -91,12 +91,26 @@ describe('ChannelSidebar Component', () => {
 
         await waitFor(() => {
             const unreadChannel = screen.getByText('random');
-            // Check for bold font weight as indicator (as implemented in code)
             expect(unreadChannel).toHaveStyle('font-weight: bold');
         });
         
-        // Assert current channel is NOT bold
         const selectedChannel = screen.getByText('general');
         expect(selectedChannel).not.toHaveStyle('font-weight: bold');
+    });
+
+    it('applies correct spacing styles to channels and categories', async () => {
+        render(<ChannelSidebar />);
+
+        await waitFor(() => {
+            const channelItems = screen.getAllByText(/general|random/).map(el => el.closest('div[style*="margin-bottom"]'));
+            channelItems.forEach(item => {
+                expect(item).toHaveStyle('margin-bottom: 2px');
+            });
+
+            const category = screen.getByText('TEXT CHANNELS').closest('div[style*="margin-top"]');
+            // Mock state has 1 category and 2 channels belonging to it, so uncategorizedChannels.length is 0.
+            // index 0 && 0 length => marginTop: 0px
+            expect(category).toHaveStyle('margin-top: 0px');
+        });
     });
 });

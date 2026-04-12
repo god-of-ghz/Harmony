@@ -11,6 +11,7 @@ export interface Account {
     key_salt?: string;
     key_iv?: string;
     trusted_servers?: string[];
+    token?: string;
 }
 
 export interface Relationship {
@@ -68,6 +69,7 @@ export interface ChannelData {
     category_id: string | null;
     name: string;
     type?: 'text' | 'voice';
+    public_key?: string | null;
 }
 
 export interface MessageData {
@@ -86,6 +88,16 @@ export interface MessageData {
     replied_author?: string | null;
     replied_content?: string | null;
     reactions?: { author_id: string, emoji: string }[];
+    is_encrypted?: boolean;
+    embeds?: string; // JSON stringified array of Discord-style embed objects
+}
+
+export interface EmojiData {
+    id: string;
+    server_id: string;
+    name: string;
+    url: string;
+    animated: boolean;
 }
 
 export interface PresenceData {
@@ -118,6 +130,7 @@ interface AppState {
     claimedProfiles: Profile[];
     setClaimedProfiles: (profiles: Profile[]) => void;
     addClaimedProfile: (profile: Profile) => void;
+    updateClaimedProfile: (profile: Profile) => void;
 
     activeServerId: string | null;
     setActiveServerId: (id: string) => void;
@@ -177,22 +190,63 @@ interface AppState {
 
     currentUserPermissions: number;
     setCurrentUserPermissions: (perms: number) => void;
+
+    isSearchSidebarOpen: boolean;
+    setSearchSidebarOpen: (open: boolean) => void;
+    searchQuery: string;
+    setSearchQuery: (query: string) => void;
+    searchResults: any[];
+    setSearchResults: (results: any[]) => void;
+
+    pendingJump: { channelId: string, messageId: string } | null;
+    setPendingJump: (jump: { channelId: string, messageId: string } | null) => void;
+
+    emojis: Record<string, EmojiData[]>;
+    fetchServerEmojis: (serverId: string) => Promise<void>;
+
+    zoomedImageUrl: string | null;
+    setZoomedImageUrl: (url: string | null) => void;
+
+    unclaimedProfiles: Profile[];
+    setUnclaimedProfiles: (profiles: Profile[]) => void;
+    dismissedGlobalClaim: boolean;
+    setDismissedGlobalClaim: (dismissed: boolean) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
     currentAccount: null,
-    setCurrentAccount: (account) => set({ currentAccount: account }),
+    setCurrentAccount: (account) => {
+        if (account && account.token) {
+            // Update cached storage if it exists
+            const cached = localStorage.getItem('harmony_account');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                localStorage.setItem('harmony_account', JSON.stringify({ ...parsed, token: account.token }));
+            }
+        }
+        set({ currentAccount: account });
+    },
 
     claimedProfiles: [],
     setClaimedProfiles: (profiles) => set({ claimedProfiles: profiles }),
     addClaimedProfile: (profile) => set((state) => ({ claimedProfiles: [...state.claimedProfiles, profile] })),
+    updateClaimedProfile: (profile) => set((state) => ({ claimedProfiles: state.claimedProfiles.map(p => p.id === profile.id && p.server_id === profile.server_id ? profile : p) })),
 
-    activeServerId: null,
-    setActiveServerId: (id) => set({ activeServerId: id, activeChannelId: null, activeChannelName: '', currentUserPermissions: 0 }),
+    activeServerId: localStorage.getItem('harmony_active_server_id'),
+    setActiveServerId: (id) => {
+        localStorage.setItem('harmony_active_server_id', id || '');
+        localStorage.removeItem('harmony_active_channel_id');
+        localStorage.removeItem('harmony_active_channel_name');
+        set({ activeServerId: id, activeChannelId: null, activeChannelName: '', currentUserPermissions: 0 });
+    },
 
-    activeChannelId: null,
-    activeChannelName: '',
-    setActiveChannelId: (id, name = '') => set({ activeChannelId: id, activeChannelName: name }),
+    activeChannelId: localStorage.getItem('harmony_active_channel_id'),
+    activeChannelName: localStorage.getItem('harmony_active_channel_name') || '',
+    setActiveChannelId: (id, name = '') => {
+        localStorage.setItem('harmony_active_channel_id', id);
+        localStorage.setItem('harmony_active_channel_name', name);
+        set({ activeChannelId: id, activeChannelName: name });
+    },
 
     activeVoiceChannelId: null,
     setActiveVoiceChannelId: (id) => set({ activeVoiceChannelId: id }),
@@ -200,10 +254,20 @@ export const useAppStore = create<AppState>((set) => ({
     showUnknownTags: false,
     setShowUnknownTags: (show: boolean) => set({ showUnknownTags: show }),
 
-    knownServers: JSON.parse(localStorage.getItem('harmony_known_servers') || '[]'),
+    knownServers: (() => {
+        try {
+            const stored = localStorage.getItem('harmony_known_servers');
+            if (!stored) return [];
+            const parsed = JSON.parse(stored);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    })(),
     setKnownServers: (urls) => {
-        localStorage.setItem('harmony_known_servers', JSON.stringify(urls));
-        set({ knownServers: urls });
+        const safeUrls = Array.isArray(urls) ? urls : [];
+        localStorage.setItem('harmony_known_servers', JSON.stringify(safeUrls));
+        set({ knownServers: safeUrls });
     },
     addKnownServer: (url) => set((state) => {
         if (!state.knownServers.includes(url)) {
@@ -215,7 +279,7 @@ export const useAppStore = create<AppState>((set) => ({
     }),
 
     trustedServers: [],
-    setTrustedServers: (urls) => set({ trustedServers: urls }),
+    setTrustedServers: (urls) => set({ trustedServers: Array.isArray(urls) ? urls : [] }),
 
     serverMap: {},
     setServerMap: (map) => set({ serverMap: map }),
@@ -281,5 +345,51 @@ export const useAppStore = create<AppState>((set) => ({
     })),
 
     currentUserPermissions: 0,
-    setCurrentUserPermissions: (perms) => set({ currentUserPermissions: perms })
+    setCurrentUserPermissions: (perms) => set({ currentUserPermissions: perms }),
+
+    isSearchSidebarOpen: false,
+    setSearchSidebarOpen: (open) => set({ isSearchSidebarOpen: open }),
+    searchQuery: '',
+    setSearchQuery: (query) => set({ searchQuery: query }),
+    searchResults: [],
+    setSearchResults: (results) => set({ searchResults: results }),
+
+    pendingJump: null,
+    setPendingJump: (jump) => set({ pendingJump: jump }),
+
+    emojis: {},
+    fetchServerEmojis: async (serverId) => {
+        const state = get();
+        if (state.emojis[serverId]) return;
+
+        const token = state.currentAccount?.token;
+        if (!token) return;
+
+        try {
+            const response = await fetch(`/api/servers/${serverId}/emojis`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                set((state) => ({
+                    emojis: {
+                        ...state.emojis,
+                        [serverId]: data
+                    }
+                }));
+            }
+        } catch (error) {
+            console.error('Failed to fetch emojis:', error);
+        }
+    },
+
+    zoomedImageUrl: null,
+    setZoomedImageUrl: (url) => set({ zoomedImageUrl: url }),
+
+    unclaimedProfiles: [],
+    setUnclaimedProfiles: (profiles) => set({ unclaimedProfiles: profiles }),
+    dismissedGlobalClaim: false,
+    setDismissedGlobalClaim: (dismissed) => set({ dismissedGlobalClaim: dismissed }),
 }));

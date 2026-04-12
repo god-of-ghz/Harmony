@@ -189,3 +189,92 @@ export async function verifySignature(payload: string, signatureBase64: string, 
         return false;
     }
 }
+export async function deriveSharedKey(privateKey: CryptoKey, publicKeyBase64: string): Promise<CryptoKey> {
+
+    // 1. Import the peer's public key for ECDH
+    const peerPubKeyBuffer = base64ToArrayBuffer(publicKeyBase64);
+    const peerPubKey = await window.crypto.subtle.importKey(
+        "spki",
+        peerPubKeyBuffer,
+        {
+            name: "ECDH",
+            namedCurve: "P-256"
+        },
+        true,
+        []
+    );
+
+    // 2. We need to ensure our private key is an ECDH key. 
+    // If it's ECDSA, we must export and re-import it as ECDH.
+    let ecdhPrivateKey = privateKey;
+    if (privateKey.algorithm.name === "ECDSA") {
+        const pkcs8 = await window.crypto.subtle.exportKey("pkcs8", privateKey);
+        ecdhPrivateKey = await window.crypto.subtle.importKey(
+            "pkcs8",
+            pkcs8,
+            {
+                name: "ECDH",
+                namedCurve: "P-256"
+            },
+            false,
+            ["deriveKey", "deriveBits"]
+        );
+    }
+
+    // 3. Derive the AES-GCM key
+    return await window.crypto.subtle.deriveKey(
+        {
+            name: "ECDH",
+            public: peerPubKey
+        },
+        ecdhPrivateKey,
+        {
+            name: "AES-GCM",
+            length: 256
+        },
+        false,
+        ["encrypt", "decrypt"]
+    );
+}
+
+export async function encryptMessageContent(plaintext: string, aesKey: CryptoKey): Promise<string> {
+    const encoder = new TextEncoder();
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const data = encoder.encode(plaintext);
+
+    const ciphertext = await window.crypto.subtle.encrypt(
+        {
+            name: "AES-GCM",
+            iv: iv
+        },
+        aesKey,
+        data
+    );
+
+    const ivBase64 = arrayBufferToBase64(iv.buffer);
+    const ciphertextBase64 = arrayBufferToBase64(ciphertext);
+
+    return `${ivBase64}:${ciphertextBase64}`;
+}
+
+export async function decryptMessageContent(formattedContent: string, aesKey: CryptoKey): Promise<string> {
+    const [ivBase64, ciphertextBase64] = formattedContent.split(':');
+    if (!ivBase64 || !ciphertextBase64) {
+        throw new Error("Invalid encrypted message format");
+    }
+
+    const iv = base64ToArrayBuffer(ivBase64);
+    const ciphertext = base64ToArrayBuffer(ciphertextBase64);
+
+    const decryptedBuffer = await window.crypto.subtle.decrypt(
+        {
+            name: "AES-GCM",
+            iv: new Uint8Array(iv)
+        },
+        aesKey,
+        ciphertext
+    );
+
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedBuffer);
+}

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { setupConnectionTracking, getGlobalPresence } from '../src/websocket';
+import { generateToken } from '../src/app';
 
 // Mock WebSocket class
 class MockWebSocket {
@@ -43,7 +44,7 @@ describe('WebSocket Unit Tests', () => {
         setupConnectionTracking(ws as any, broadcastMessage);
         const accountId = 'user-ws-1';
         
-        ws.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId } });
+        ws.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId, token: generateToken(accountId) } });
         
         expect(broadcastMessage).toHaveBeenCalledWith(expect.objectContaining({
             type: 'PRESENCE_UPDATE',
@@ -59,7 +60,7 @@ describe('WebSocket Unit Tests', () => {
         const accountId = 'user-ws-2';
         
         // Identify first to set the socketAccountMap
-        ws.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId } });
+        ws.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId, token: generateToken(accountId) } });
         
         ws.emulateMessage({ type: 'TYPING_START', data: { channelId: 'chan-1' } });
         
@@ -73,12 +74,12 @@ describe('WebSocket Unit Tests', () => {
         // Setup initial state: user-ws-1 is already online
         const ws1 = new MockWebSocket();
         setupConnectionTracking(ws1 as any, broadcastMessage);
-        ws1.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId: 'user-ws-1' } });
+        ws1.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId: 'user-ws-1', token: generateToken('user-ws-1') } });
 
         // New connection
         const ws2 = new MockWebSocket();
         setupConnectionTracking(ws2 as any, broadcastMessage);
-        ws2.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId: 'user-ws-3' } });
+        ws2.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId: 'user-ws-3', token: generateToken('user-ws-3') } });
 
         expect(ws2.send).toHaveBeenCalledWith(expect.stringContaining('"type":"PRESENCE_SYNC"'));
         const syncCall = ws2.send.mock.calls.find(call => call[0].includes('PRESENCE_SYNC'));
@@ -94,7 +95,7 @@ describe('WebSocket Unit Tests', () => {
     it('Lifecycle: closing a socket removes user from presence map and broadcasts offline', () => {
         setupConnectionTracking(ws as any, broadcastMessage);
         const accountId = 'user-ws-4';
-        ws.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId } });
+        ws.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId, token: generateToken(accountId) } });
         
         ws.close();
         

@@ -144,8 +144,8 @@ describe('LoginSignup Component', () => {
 
     it('updates local state for the custom Network Server URL', () => {
         render(<LoginSignup />);
-        // Find the server URL input by its placeholder text — more robust than label matching
-        const urlInput = screen.getByPlaceholderText('http://96.230.218.248:3001');
+        // Find the server URL input by its placeholder text
+        const urlInput = screen.getByPlaceholderText('http://localhost:3001 or https://example.com');
 
         fireEvent.change(urlInput, { target: { value: 'http://96.230.218.248:3001' } });
         expect(urlInput).toHaveValue('http://96.230.218.248:3001');

@@ -34,9 +34,11 @@ export const LoginSignup = () => {
         }
     };
 
-    const fetchProfiles = async (accountId: string, baseUrl: string) => {
+    const fetchProfiles = async (accountId: string, baseUrl: string, token?: string) => {
         try {
-            const res = await fetch(`${baseUrl}/api/accounts/${accountId}/profiles`);
+            const res = await fetch(`${baseUrl}/api/accounts/${accountId}/profiles`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (res.ok) {
                 const profiles = await res.json();
                 setClaimedProfiles(profiles);
@@ -198,7 +200,7 @@ export const LoginSignup = () => {
                 setTrustedServers(data.trusted_servers || []);
                 addKnownServer(initialServerUrl);
                 setIsGuestSession(false);
-                await fetchProfiles(data.id, initialServerUrl);
+                await fetchProfiles(data.id, initialServerUrl, data.token);
                 setCurrentAccount(data);
             } else {
                 setError(data.error || 'An error occurred');
@@ -378,7 +380,7 @@ export const LoginSignup = () => {
                         type="text"
                         value={initialServerUrl}
                         onChange={e => setInitialServerUrl(e.target.value)}
-                        placeholder="http://96.230.218.248:3001"
+                        placeholder="http://localhost:3001 or https://example.com"
                         style={{
                             width: '100%', backgroundColor: 'var(--bg-tertiary)', border: 'none', borderRadius: '3px',
                             color: 'var(--text-normal)', padding: '8px', fontSize: '12px', outline: 'none', marginTop: '4px',

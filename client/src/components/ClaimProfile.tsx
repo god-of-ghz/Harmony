@@ -15,11 +15,18 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
     useEffect(() => {
         if (!serverUrl) return;
         setLoading(true);
-        fetch(`${serverUrl}/api/servers/${serverId}/profiles`)
+        fetch(`${serverUrl}/api/servers/${serverId}/profiles`, {
+            headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+        })
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data)) {
                     setProfiles(data);
+                    // If no unclaimed profiles, default to Fresh Start automatically
+                    const unclaimedCount = data.filter(p => !p.account_id).length;
+                    if (unclaimedCount === 0) {
+                        setIsFreshStart(true);
+                    }
                 } else if (data.error) {
                     setError(data.error);
                 }
@@ -30,13 +37,16 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
                 setError('Failed to connect to server');
                 setLoading(false);
             });
-    }, [serverId, serverUrl]);
+    }, [serverId, serverUrl, currentAccount?.token]);
 
     const handleClaim = (profileId: string) => {
         if (!currentAccount || !serverUrl) return; // Ensure currentAccount exists
         fetch(`${serverUrl}/api/profiles/claim`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentAccount.token}`
+            },
             body: JSON.stringify({ profileId, serverId, accountId: currentAccount.id })
         })
             .then(res => res.json())
@@ -62,7 +72,10 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
 
         fetch(`${serverUrl}/api/servers/${serverId}/profiles`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentAccount.token}`
+            },
             body: JSON.stringify({ accountId: currentAccount.id, nickname: freshName, isGuest: isGuestSession })
         })
             .then(async res => {
@@ -127,7 +140,7 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
                             style={{ width: '100%', padding: '10px', marginBottom: '16px', borderRadius: '4px', border: 'none', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-normal)' }}
                         />
                         {unclaimedProfiles.length === 0 ? (
-                            <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No unclaimed profiles limit found on this server.</div>
+                            <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No unclaimed profiles found on this server.</div>
                         ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto', paddingRight: '8px' }}>
                                 {filteredProfiles.map(p => (

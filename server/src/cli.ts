@@ -21,7 +21,7 @@ const main = async () => {
                 const serverName = process.argv[3] || "Imported Server";
                 const serverId = 'server-' + Date.now().toString();
                 await dbManager.initializeServerBundle(serverId, serverName, '');
-                await importDiscordJson(targetPath, serverId);
+                await importDiscordJson(targetPath, serverId, 'legacy-id');
             }
             console.log("Import complete. You can now start the server.");
             process.exit(0);

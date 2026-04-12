@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore, Permission } from '../store/appStore';
-import { X, Plus, Trash, GripVertical, Save, Edit2, Shield, Users, Layers } from 'lucide-react';
+import { Layers, Shield, Users, X, Plus, GripVertical, Trash, Save, User, Edit2 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
 import type { RoleData } from '../store/appStore';
@@ -10,11 +10,80 @@ type Category = { id: string, name: string, position: number };
 type ProfileExt = { id: string, nickname: string, aliases: string };
 
 export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
-    const { activeServerId, currentAccount, claimedProfiles, showUnknownTags, setShowUnknownTags, serverMap, currentUserPermissions } = useAppStore();
+    const { activeServerId, currentAccount, claimedProfiles, showUnknownTags, setShowUnknownTags, serverMap, currentUserPermissions, serverProfiles } = useAppStore();
     const serverUrl = serverMap[activeServerId || ''];
     const currentProfile = claimedProfiles.find(p => p.server_id === activeServerId);
+    const isAuthorized = (currentUserPermissions & (Permission.MANAGE_SERVER | Permission.ADMINISTRATOR)) !== 0;
 
-    const [activeTab, setActiveTab] = useState<'hierarchy' | 'roles' | 'members'>('hierarchy');
+    const [activeTab, setActiveTab] = useState<'overview' | 'roles' | 'channels' | 'members' | 'profile' | 'hierarchy'>(isAuthorized ? 'overview' : 'profile');
+
+    // Profile state
+    const [nickname, setNickname] = useState(currentProfile?.nickname || '');
+    const [avatarPreview, setAvatarPreview] = useState(currentProfile?.avatar || '');
+    const [savingProfile, setSavingProfile] = useState(false);
+
+    const handleAvatarUpload = async (file: File) => {
+        if (!activeServerId || !serverUrl || !currentAccount) return;
+        const formData = new FormData();
+        formData.append('files', file);
+        try {
+            const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/attachments`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentAccount.token}` },
+                body: formData
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setAvatarPreview(data.urls[0]);
+            }
+        } catch (err) {
+            console.error("Avatar upload failed", err);
+        }
+    };
+
+    const handleSaveProfile = async () => {
+        if (!activeServerId || !serverUrl || !currentAccount || !currentProfile) return;
+        setSavingProfile(true);
+        try {
+            const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/profiles/${currentProfile.id}`, {
+                method: 'PATCH',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentAccount.token}`
+                },
+                body: JSON.stringify({ nickname, avatar: avatarPreview })
+            });
+            if (res.ok) {
+                const updated = await res.json();
+                useAppStore.getState().updateServerProfile(updated);
+                useAppStore.getState().updateClaimedProfile(updated);
+            }
+        } catch (err) {
+            console.error("Failed to save profile", err);
+        } finally {
+            setSavingProfile(false);
+        }
+    };
+
+    const handleForceLink = async (profileId: string, accountId: string) => {
+        if (!activeServerId || !serverUrl || !currentAccount) return;
+        try {
+            const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/force-link`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentAccount.token}`
+                },
+                body: JSON.stringify({ profileId, accountId })
+            });
+            if (res.ok) {
+                alert("Profile linked successfully!");
+            }
+        } catch (err) {
+            console.error("Force link failed", err);
+        }
+    };
+
     const [editingChannelPerms, setEditingChannelPerms] = useState<Channel | null>(null);
     const [channelOverrides, setChannelOverrides] = useState<any[]>([]);
     const [channels, setChannels] = useState<Channel[]>([]);
@@ -45,10 +114,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
     useEffect(() => {
         if (!activeServerId || !serverUrl) return;
         Promise.all([
-            fetch(`${serverUrl}/api/servers/${activeServerId}/categories`).then(r => r.json()),
-            fetch(`${serverUrl}/api/servers/${activeServerId}/channels`).then(r => r.json()),
-            fetch(`${serverUrl}/api/servers/${activeServerId}/profiles`).then(r => r.json()),
-            fetch(`${serverUrl}/api/servers/${activeServerId}/roles`).then(r => r.json())
+            fetch(`${serverUrl}/api/servers/${activeServerId}/categories`, { headers: { 'Authorization': `Bearer ${currentAccount?.token}` } }).then(r => r.json()),
+            fetch(`${serverUrl}/api/servers/${activeServerId}/channels`, { headers: { 'Authorization': `Bearer ${currentAccount?.token}` } }).then(r => r.json()),
+            fetch(`${serverUrl}/api/servers/${activeServerId}/profiles`, { headers: { 'Authorization': `Bearer ${currentAccount?.token}` } }).then(r => r.json()),
+            fetch(`${serverUrl}/api/servers/${activeServerId}/roles`, { headers: { 'Authorization': `Bearer ${currentAccount?.token}` } }).then(r => r.json())
         ]).then(([cats, chans, profs, serverRoles]) => {
             setCategories(cats);
             setChannels(chans);
@@ -61,7 +130,9 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
 
             // Fetch role assignments for each profile
             profs.forEach((p: any) => {
-                fetch(`${serverUrl}/api/servers/${activeServerId}/profiles/${p.id}/roles`)
+                fetch(`${serverUrl}/api/servers/${activeServerId}/profiles/${p.id}/roles`, {
+                    headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+                })
                     .then(r => r.json())
                     .then(data => {
                         setProfileRoles(prev => ({ ...prev, [p.id]: data.map((r: any) => r.id) }));
@@ -76,7 +147,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         const payload = { name: newChannelName, categoryId: null, type: newChannelType };
         fetch(`${serverUrl}/api/servers/${activeServerId}/channels`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify(payload)
         })
             .then(res => {
@@ -100,7 +174,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
 
         fetch(`${serverUrl}/api/servers/${activeServerId}/categories`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify({ name: newCategoryName, position: categories.length })
         })
             .then(res => res.json())
@@ -117,7 +194,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!currentAccount || !serverUrl) return;
         fetch(`${serverUrl}/api/categories/${categoryId}`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id }
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            }
         }).then(() => {
             setCategories(categories.filter(c => c.id !== categoryId));
             setChannels(channels.map(ch => ch.category_id === categoryId ? { ...ch, category_id: null } : ch));
@@ -128,7 +208,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!currentAccount || !editingCategoryName.trim() || !serverUrl) return;
         fetch(`${serverUrl}/api/categories/${categoryId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify({ name: editingCategoryName })
         }).then(() => {
             setCategories(categories.map(c => c.id === categoryId ? { ...c, name: editingCategoryName } : c));
@@ -140,7 +223,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!currentAccount || !activeServerId || !serverUrl) return;
         fetch(`${serverUrl}/api/channels/${channelId}?serverId=${activeServerId}`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id }
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            }
         }).then(res => {
             if (res.ok) {
                 setChannels(channels.filter(c => c.id !== channelId));
@@ -152,7 +238,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!currentAccount || !editingChannelNameLocal.trim() || !serverUrl) return;
         fetch(`${serverUrl}/api/channels/${channelId}?serverId=${activeServerId}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify({ name: editingChannelNameLocal })
         }).then(res => res.json()).then(data => {
             setChannels(channels.map(c => c.id === channelId ? { ...c, name: data.name } : c));
@@ -164,7 +253,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!currentAccount || !activeServerId || !serverUrl) return;
         fetch(`${serverUrl}/api/servers/${activeServerId}/reorder`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify({ categories, channels: channels.map(ch => ({ id: ch.id, position: ch.position, categoryId: ch.category_id })) })
         }).then(() => {
             onClose();
@@ -175,7 +267,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!currentAccount || !serverUrl) return;
         fetch(`${serverUrl}/api/profiles/${profileId}/aliases`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify({ aliases: aliasEdits[profileId] })
         }).catch(console.error);
     };
@@ -184,7 +279,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!newRoleName.trim() || !activeServerId || !serverUrl || !currentAccount) return;
         fetch(`${serverUrl}/api/servers/${activeServerId}/roles`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify({ name: newRoleName, color: '#99aab5', permissions: 0, position: roles.length })
         }).then(r => r.json()).then(role => {
             setRoles([...roles, role]);
@@ -196,7 +294,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!activeServerId || !serverUrl || !currentAccount) return;
         fetch(`${serverUrl}/api/servers/${activeServerId}/roles/${role.id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: JSON.stringify(role)
         }).then(() => {
             setRoles(roles.map(r => r.id === role.id ? role : r));
@@ -207,7 +308,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!activeServerId || !serverUrl || !currentAccount) return;
         fetch(`${serverUrl}/api/servers/${activeServerId}/roles/${roleId}`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id }
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            }
         }).then(() => {
             setRoles(roles.filter(r => r.id !== roleId));
         });
@@ -221,7 +325,10 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         
         fetch(url, {
             method,
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'Authorization': `Bearer ${currentAccount.token}` 
+            },
             body: isAssigned ? undefined : JSON.stringify({ roleId })
         }).then(() => {
             setProfileRoles(prev => ({
@@ -295,7 +402,9 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
 
     const fetchOverrides = (channelId: string) => {
         if (!activeServerId || !serverUrl) return;
-        fetch(`${serverUrl}/api/channels/${channelId}/overrides`)
+        fetch(`${serverUrl}/api/channels/${channelId}/overrides`, {
+            headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+        })
             .then(r => r.json())
             .then(data => setChannelOverrides(data))
             .catch(console.error);
@@ -305,7 +414,7 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!activeServerId || !serverUrl || !currentAccount) return;
         fetch(`${serverUrl}/api/channels/${channelId}/overrides?serverId=${activeServerId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentAccount.token}` },
             body: JSON.stringify({ targetId, targetType, allow, deny })
         }).then(() => fetchOverrides(channelId)).catch(console.error);
     };
@@ -314,21 +423,22 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
         if (!activeServerId || !serverUrl || !currentAccount) return;
         fetch(`${serverUrl}/api/channels/${channelId}/overrides/${targetId}?serverId=${activeServerId}`, {
             method: 'DELETE',
-            headers: { 'X-Account-Id': currentAccount.id }
+            headers: { 'Authorization': `Bearer ${currentAccount.token}` }
         }).then(() => fetchOverrides(channelId)).catch(console.error);
     };
 
-    if (!currentProfile || (currentUserPermissions & (Permission.MANAGE_SERVER | Permission.ADMINISTRATOR)) === 0) {
+    if (!currentProfile) {
         return (
             <div data-testid="access-denied" style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
                 <div className="glass-panel" style={{ padding: '32px', borderRadius: '8px', color: 'white' }}>
                     <h2>Access Denied</h2>
-                    <p>You do not have permission to view server settings.</p>
+                    <p>You do not have a profile on this server.</p>
                     <button className="btn" onClick={onClose}>Close</button>
                 </div>
             </div>
         );
     }
+
 
     const uncategorizedChannels = channels.filter(c => !c.category_id).sort((a, b) => a.position - b.position);
     const sortedCategories = [...categories].sort((a, b) => a.position - b.position);
@@ -339,23 +449,33 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
                     <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                         <div 
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'hierarchy' ? 'var(--bg-modifier-selected)' : 'transparent' }}
-                            onClick={() => setActiveTab('hierarchy')}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'profile' ? 'var(--bg-modifier-selected)' : 'transparent' }}
+                            onClick={() => setActiveTab('profile')}
                         >
-                            <Layers size={20} /> <span style={{ fontWeight: 600 }}>Hierarchy</span>
+                            <User size={20} /> <span style={{ fontWeight: 600 }}>Profile</span>
                         </div>
-                        <div 
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'roles' ? 'var(--bg-modifier-selected)' : 'transparent' }}
-                            onClick={() => setActiveTab('roles')}
-                        >
-                            <Shield size={20} /> <span style={{ fontWeight: 600 }}>Roles</span>
-                        </div>
-                        <div 
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'members' ? 'var(--bg-modifier-selected)' : 'transparent' }}
-                            onClick={() => setActiveTab('members')}
-                        >
-                            <Users size={20} /> <span style={{ fontWeight: 600 }}>Members</span>
-                        </div>
+                        {isAuthorized && (
+                            <>
+                                <div 
+                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'hierarchy' ? 'var(--bg-modifier-selected)' : 'transparent' }}
+                                    onClick={() => setActiveTab('hierarchy')}
+                                >
+                                    <Layers size={20} /> <span style={{ fontWeight: 600 }}>Hierarchy</span>
+                                </div>
+                                <div 
+                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'roles' ? 'var(--bg-modifier-selected)' : 'transparent' }}
+                                    onClick={() => setActiveTab('roles')}
+                                >
+                                    <Shield size={20} /> <span style={{ fontWeight: 600 }}>Roles</span>
+                                </div>
+                                <div 
+                                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', backgroundColor: activeTab === 'members' ? 'var(--bg-modifier-selected)' : 'transparent' }}
+                                    onClick={() => setActiveTab('members')}
+                                >
+                                    <Users size={20} /> <span style={{ fontWeight: 600 }}>Members</span>
+                                </div>
+                            </>
+                        )}
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                         {activeTab === 'hierarchy' && (
@@ -730,6 +850,105 @@ export const ServerSettings = ({ onClose }: { onClose: () => void }) => {
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    )}
+                    {activeTab === 'profile' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                            <div style={{ backgroundColor: 'var(--bg-secondary)', padding: '24px', borderRadius: '8px' }}>
+                                <h3 style={{ marginBottom: '16px' }}>Server Identity</h3>
+                                <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                                        <div style={{ width: '80px', height: '80px', borderRadius: '50%', backgroundColor: 'var(--bg-modifier-accent)', overflow: 'hidden', border: '4px solid var(--bg-tertiary)' }}>
+                                            {avatarPreview ? (
+                                                <img src={avatarPreview.startsWith('http') ? avatarPreview : `${serverUrl}${avatarPreview}`} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            ) : (
+                                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', fontWeight: 'bold' }}>
+                                                    {nickname.substring(0, 2).toUpperCase()}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <label className="btn" style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>
+                                            Change Avatar
+                                            <input type="file" style={{ display: 'none' }} accept="image/*" onChange={(e) => {
+                                                if (e.target.files?.[0]) handleAvatarUpload(e.target.files[0]);
+                                            }} />
+                                        </label>
+                                    </div>
+                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Server Nickname</label>
+                                            <input 
+                                                type="text" 
+                                                className="input-field" 
+                                                value={nickname} 
+                                                onChange={e => setNickname(e.target.value)}
+                                                placeholder={currentProfile.original_username}
+                                            />
+                                        </div>
+                                        <button className="btn" disabled={savingProfile} onClick={handleSaveProfile} style={{ alignSelf: 'flex-start', padding: '10px 20px', fontWeight: '600' }}>
+                                            {savingProfile ? 'Saving...' : 'Save Profile Changes'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {currentProfile.role === 'OWNER' && (
+                                <div style={{ backgroundColor: 'var(--bg-secondary)', padding: '24px', borderRadius: '8px' }}>
+                                    <h3 style={{ marginBottom: '8px', color: 'var(--status-warning)' }}>Owner Overrides</h3>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '16px' }}>Force link orphaned profiles to existing accounts.</p>
+                                    
+                                    <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--divider)', borderRadius: '4px' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                                            <thead>
+                                                <tr style={{ borderBottom: '1px solid var(--divider)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                                                    <th style={{ padding: '8px' }}>Orphan Profile</th>
+                                                    <th style={{ padding: '8px' }}>Target Account ID</th>
+                                                    <th style={{ padding: '8px' }}>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {serverProfiles.filter(p => !p.account_id).map(p => (
+                                                    <tr key={p.id} style={{ borderBottom: '1px solid var(--divider)' }}>
+                                                        <td style={{ padding: '8px' }}>
+                                                            <div style={{ fontWeight: '500' }}>{p.nickname}</div>
+                                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {p.id}</div>
+                                                        </td>
+                                                        <td style={{ padding: '8px' }}>
+                                                            <input 
+                                                                type="text" 
+                                                                placeholder="Paste Account ID"
+                                                                style={{ padding: '4px', width: '100%', fontSize: '12px' }}
+                                                                onBlur={(e) => {
+                                                                    const aid = e.target.value.trim();
+                                                                    if (aid) (p as any)._targetAid = aid;
+                                                                }}
+                                                            />
+                                                        </td>
+                                                        <td style={{ padding: '8px' }}>
+                                                            <button 
+                                                                className="btn btn-secondary" 
+                                                                style={{ padding: '4px 8px', fontSize: '11px' }}
+                                                                onClick={() => {
+                                                                    const aid = (p as any)._targetAid;
+                                                                    if (aid) handleForceLink(p.id, aid);
+                                                                    else alert("Please enter a Target Account ID");
+                                                                }}
+                                                            >
+                                                                Link
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {serverProfiles.filter(p => !p.account_id).length === 0 && (
+                                                    <tr>
+                                                        <td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No orphaned profiles found.</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

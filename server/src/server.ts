@@ -1,5 +1,6 @@
 import './setup';
 import http from 'http';
+import https from 'https';
 import { WebSocketServer, WebSocket } from 'ws';
 import dbManager from './database';
 import { createApp } from './app';
@@ -10,8 +11,8 @@ import { startMediasoup } from './media/sfu';
 import { setupWebRTC } from './media/signaling';
 import { setupConnectionTracking } from './websocket';
 
-const importArgIndex = process.argv.indexOf('--import');
-const elevateArgIndex = process.argv.indexOf('--elevate');
+const importArgIndex = process.argv.findIndex(arg => arg === '--import' || arg === 'import');
+const elevateArgIndex = process.argv.findIndex(arg => arg === '--elevate' || arg === 'elevate');
 
 const portArgIndex = process.argv.indexOf('--port');
 const portArgValue = portArgIndex !== -1 ? process.argv[portArgIndex + 1] : null;
@@ -40,7 +41,7 @@ if (importArgIndex !== -1) {
             } else {
                 const serverId = 'server-' + Date.now().toString();
                 await dbManager.initializeServerBundle(serverId, serverName, '');
-                await importDiscordJson(targetPath, serverId);
+                await importDiscordJson(targetPath, serverId, 'legacy-id');
             }
             console.log("Import complete. You can now start the server normally.");
             process.exit(0);
@@ -71,7 +72,36 @@ if (importArgIndex !== -1) {
     // --- STANDARD SERVER BOOT ---
     const startServer = async () => {
         await startMediasoup().catch(console.error);
-        const server = http.createServer();
+        
+        const useHttps = process.env.USE_HTTPS === 'true';
+        let server: http.Server | https.Server;
+        let protocol = 'http';
+
+        if (useHttps) {
+            try {
+                const keyPath = path.join(process.cwd(), 'key.pem');
+                const certPath = path.join(process.cwd(), 'cert.pem');
+                
+                if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+                    const options = {
+                        key: fs.readFileSync(keyPath),
+                        cert: fs.readFileSync(certPath)
+                    };
+                    server = https.createServer(options);
+                    protocol = 'https';
+                    console.log("TLS/HTTPS enabled: Loaded cert.pem and key.pem");
+                } else {
+                    console.warn("HTTPS requested but cert.pem or key.pem not found. Falling back to HTTP.");
+                    server = http.createServer();
+                }
+            } catch (err) {
+                console.error("Failed to initialize HTTPS server, falling back to HTTP:", err);
+                server = http.createServer();
+            }
+        } else {
+            server = http.createServer();
+        }
+
         const wss = new WebSocketServer({ server });
 
         const clients = new Set<WebSocket>();
@@ -139,10 +169,21 @@ if (importArgIndex !== -1) {
         server.on('request', app);
 
         server.listen(PORT as number, '0.0.0.0', () => {
-            console.log(`Server is running and accessible at http://localhost:${PORT}`);
+            console.log(`Server is running and accessible at ${protocol}://localhost:${PORT}`);
             if (isMock) console.log("Mock mode is enabled. Use admin@harmony.local / password123 to login.");
+            if (protocol === 'https') {
+                console.log("NOTE: If using self-signed certs locally, you may need NODE_TLS_REJECT_UNAUTHORIZED=0 in your client environment.");
+            }
         });
     };
 
-    startServer();
+    const bootstrap = async () => {
+        await startServer();
+    };
+
+    if (require.main === module || !process.env.VITEST) {
+        bootstrap();
+    }
 }
+
+export {}; // Ensure it's a module

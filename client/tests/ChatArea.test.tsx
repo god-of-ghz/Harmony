@@ -46,7 +46,7 @@ describe('ChatArea component', () => {
                 aliases: ''
             }],
             serverMap: { 'server1': 'http://localhost' },
-            currentAccount: { id: 'account1', email: 'test@example.com', is_creator: false },
+            currentAccount: { id: 'account1', email: 'test@example.com', is_creator: false, token: 'test-jwt-token' },
             unreadChannels: new Set(),
             presenceMap: {},
             currentUserPermissions: 0xFFFFFFFF,
@@ -162,7 +162,7 @@ describe('ChatArea component', () => {
 
         await waitFor(() => {
             // Verify fetch was called for previous messages (cursor)
-            expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('cursor='));
+            expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('cursor='), expect.any(Object));
         });
     });
 
@@ -199,5 +199,50 @@ describe('ChatArea component', () => {
         await waitFor(() => {
             expect(screen.getByText(/Incoming from WS/)).toBeInTheDocument();
         }, { timeout: 2000 });
+    });
+
+    it('handles message jump gracefully via scrollToIndex', async () => {
+        useAppStore.setState({
+            activeChannelId: 'channel1',
+            pendingJump: { channelId: 'channel1', messageId: 'msg-target' }
+        });
+
+        const aroundMessages = Array.from({ length: 11 }, (_, i) => ({
+            id: i === 5 ? 'msg-target' : `msg-around-${i}`,
+            channel_id: 'channel1',
+            author_id: 'profile1',
+            content: `Message ${i}`,
+            timestamp: new Date(Date.now() - (10 - i) * 1000).toISOString(),
+            username: 'me'
+        }));
+
+        (global.fetch as any).mockImplementation((url: string) => {
+            if (url.includes('/messages/around/msg-target')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve(aroundMessages)
+                });
+            }
+            if (url.includes('/messages')) {
+                return Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve(aroundMessages)
+                });
+            }
+            return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+        });
+
+        render(<ChatArea />);
+
+        // Wait for the target message to render
+        await waitFor(() => {
+            expect(screen.getByText('Message 5')).toBeInTheDocument();
+        });
+
+        // All messages around the target should be rendered
+        await waitFor(() => {
+            expect(screen.getByText('Message 0')).toBeInTheDocument();
+            expect(screen.getByText('Message 10')).toBeInTheDocument();
+        });
     });
 });

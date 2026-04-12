@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { setupConnectionTracking, getGlobalPresence } from '../src/websocket';
-import { WebSocket } from 'ws';
+import { generateToken } from '../src/app';
 
 describe('Rich Presence WebSocket Tracking', () => {
     it('sets user online when identifying, and idle when updated', () => {
@@ -32,7 +32,9 @@ describe('Rich Presence WebSocket Tracking', () => {
         setupConnectionTracking(mockWs as any, broadcast);
 
         // Send IDENTIFY
-        mockWs.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId: 'acc123' } });
+        const accountId = 'acc123';
+        const token = generateToken(accountId);
+        mockWs.emulateMessage({ type: 'PRESENCE_IDENTIFY', data: { accountId, token } });
 
         // Checks
         const onlineEvents = events.filter(e => e.type === 'PRESENCE_UPDATE' && e.data.status === 'online');

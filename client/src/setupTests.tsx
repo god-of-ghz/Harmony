@@ -4,13 +4,15 @@ import { vi } from 'vitest';
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
+(global as any).mockScrollToIndex = vi.fn();
+
 vi.mock('react-virtuoso', () => {
     const React = require('react');
     return {
         Virtuoso: React.forwardRef(({ data, itemContent, components, startReached, ...props }: any, ref: any) => {
             const viewportRef = React.useRef(null);
             React.useImperativeHandle(ref, () => ({
-                scrollToIndex: vi.fn(),
+                scrollToIndex: (global as any).mockScrollToIndex,
                 scrollTo: vi.fn(),
             }));
 

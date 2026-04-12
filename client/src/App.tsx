@@ -5,29 +5,33 @@ import { ChannelSidebar } from './components/ChannelSidebar';
 import { ChatArea } from './components/ChatArea';
 import { ClaimProfile } from './components/ClaimProfile';
 import { LoginSignup } from './components/LoginSignup';
+import { GlobalClaimProfile } from './components/GlobalClaimProfile';
 import { DMSidebar } from './components/DMSidebar';
 import { FriendsList } from './components/FriendsList';
+import { ImageModal } from './components/ImageModal';
 
 function App() {
-  const { currentAccount, activeServerId, activeChannelId, claimedProfiles, isGuestSession, knownServers, trustedServers, setCurrentAccount, setIsGuestSession } = useAppStore();
+  const { currentAccount, activeServerId, activeChannelId, claimedProfiles, isGuestSession, knownServers, trustedServers, dismissedGlobalClaim, setCurrentAccount, setIsGuestSession } = useAppStore();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeEmail, setUpgradeEmail] = useState('');
   const [upgradePassword, setUpgradePassword] = useState('');
   const [upgradeError, setUpgradeError] = useState('');
 
-  // Hydrate trusted servers and read states on boot from cached account
   useEffect(() => {
     if (currentAccount) {
       if (currentAccount.trusted_servers) {
         useAppStore.getState().setTrustedServers(currentAccount.trusted_servers);
       }
+
+      const safeKnown = Array.isArray(knownServers) ? knownServers : [];
+      const safeTrusted = Array.isArray(trustedServers) ? trustedServers : [];
+      const homeServer = safeKnown[0] || safeTrusted[0];
       
-      const homeServer = knownServers[0] || trustedServers[0];
       if (homeServer) {
         fetch(`${homeServer}/api/read_states`, {
-          headers: { 'X-Account-Id': currentAccount.id }
+          headers: { 'Authorization': `Bearer ${currentAccount.token}` }
         })
-        .then(res => res.json())
+        .then(res => res.ok ? res.json() : [])
         .then(data => {
             if (Array.isArray(data)) {
                 const map: any = {};
@@ -38,7 +42,7 @@ function App() {
         .catch(console.error);
       }
     }
-  }, [currentAccount]);
+  }, [currentAccount, knownServers, trustedServers]);
 
   if (!currentAccount) {
     return <LoginSignup />;
@@ -65,12 +69,13 @@ function App() {
     }
   };
 
-  const activeProfile = activeServerId
+  const activeProfile = (activeServerId && Array.isArray(claimedProfiles))
     ? claimedProfiles.find(p => p.server_id === activeServerId)
     : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%' }}>
+      {!isGuestSession && !dismissedGlobalClaim && <GlobalClaimProfile />}
       {isGuestSession && (
         <div style={{ backgroundColor: 'var(--brand-experiment)', padding: '8px', textAlign: 'center', color: 'white', fontSize: '14px', fontWeight: 'bold' }}>
           You are currently using a guest account. Your data may be lost if you clear your browser data.
@@ -133,6 +138,7 @@ function App() {
           </div>
         </div>
       )}
+      <ImageModal />
     </div>
   );
 }

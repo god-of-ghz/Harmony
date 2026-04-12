@@ -15,7 +15,7 @@ export const DMSidebar = () => {
 
         try {
             const res = await fetch(`${homeServer}/api/dms`, {
-                headers: { 'X-Account-Id': currentAccount.id }
+                headers: { 'Authorization': `Bearer ${currentAccount.token}` }
             });
             if (res.ok) {
                 const data = await res.json();

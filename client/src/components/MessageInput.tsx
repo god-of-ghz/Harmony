@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Image as ImageIcon, X } from 'lucide-react';
 import type { MessageData, Profile, RoleData } from '../store/appStore';
 import { useAppStore } from '../store/appStore';
-import { signPayload } from '../utils/crypto';
+import { signPayload, deriveSharedKey, encryptMessageContent } from '../utils/crypto';
 import { MentionAutocomplete } from './MentionAutocomplete';
 import { EmojiAutocomplete } from './EmojiAutocomplete';
 import { EMOJI_MAP } from '../utils/emojis';
@@ -62,12 +62,22 @@ export const MessageInput = React.memo(({
     const handleSend = async () => {
         if ((!inputValue.trim() && pendingAttachments.length === 0) || !currentProfile || !activeChannelId) return;
 
-        // Parse @nickname to <@id>
-        const sortedProfiles = [...serverProfiles].sort((a, b) => b.nickname.length - a.nickname.length);
+        // Parse mentions (@nickname or @username) to <@id>
+        const profileTargets: { text: string, id: string }[] = [];
+        for (const p of serverProfiles) {
+            if (p.nickname) profileTargets.push({ text: p.nickname, id: p.id });
+            if (p.original_username) profileTargets.push({ text: p.original_username, id: p.id });
+        }
+        // Sort by text length descending to avoid partial matches
+        const sortedTargets = profileTargets.sort((a, b) => b.text.length - a.text.length);
+
         let parsedContent = inputValue;
-        for (const p of sortedProfiles) {
-            const regex = new RegExp(`@${p.nickname}\\b`, 'g');
-            parsedContent = parsedContent.replace(regex, `<@${p.id}>`);
+        for (const target of sortedTargets) {
+            // Use specialized regex to ensure we only match if it's not already inside a tag
+            // and handle edge cases where nickname might have special characters
+            const escapedText = target.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`@${escapedText}\\b`, 'g');
+            parsedContent = parsedContent.replace(regex, `<@${target.id}>`);
         }
 
         // Parse @RoleName to <@&id>
@@ -86,15 +96,66 @@ export const MessageInput = React.memo(({
             }
         }
 
+        // --- E2EE Encryption ---
+        let finalContent = parsedContent;
+        let isEncrypted = false;
+
+        // Attempt to find destination public key
+        // 1. Check if it's a DM (peer public key)
+        // 2. Check if it's a channel (channel public key)
+        
+        let destinationPublicKey = '';
+
+        // For simplicity in this phase, we look for the peer's public key if it's a DM, 
+        // or a channel public key if provided by the server.
+        // We look in globalProfiles or profiles.
+        
+        // Check if we can find a matching profile with a public key for this channel
+        // If it's a DM, the "channel ID" might be shared with the peer or we can find the peer's profile.
+        // In this implementation, we'll look for any public key associated with the channel or recipient.
+        
+        // Try to get channel public key from server if not already known
+        // (In a real app, this would be in the channel object in the store)
+        try {
+            const res = await fetch(`${serverUrl}/api/channels/${activeChannelId}`, {
+                headers: {
+                    'Authorization': `Bearer ${currentAccount?.token}`
+                }
+            });
+            if (res.ok) {
+                const channelData = await res.json();
+                if (channelData.public_key) {
+                    destinationPublicKey = channelData.public_key;
+                }
+            }
+        } catch (e) {
+            console.error("Failed to fetch channel public key", e);
+        }
+
+        if (destinationPublicKey && sessionPrivateKey) {
+            try {
+                const aesKey = await deriveSharedKey(sessionPrivateKey, destinationPublicKey);
+                finalContent = await encryptMessageContent(parsedContent, aesKey);
+                isEncrypted = true;
+            } catch (err) {
+                console.error("Encryption failed", err);
+            }
+        }
+        // -----------------------
+
         fetch(`${serverUrl}/api/channels/${activeChannelId}/messages`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentAccount?.token}`
+            },
             body: JSON.stringify({
-                content: parsedContent,
+                content: finalContent,
                 authorId: currentProfile.id,
                 signature,
                 attachments: JSON.stringify(pendingAttachments),
-                reply_to: replyingTo?.id || null
+                reply_to: replyingTo?.id || null,
+                is_encrypted: isEncrypted
             })
         }).catch(console.error);
 
@@ -200,7 +261,7 @@ export const MessageInput = React.memo(({
             try {
                 const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/attachments`, {
                     method: 'POST',
-                    headers: { 'X-Account-Id': currentAccount?.id || '' },
+                    headers: { 'Authorization': `Bearer ${currentAccount?.token || ''}` },
                     body: formData
                 });
                 if (!res.ok) {
@@ -228,7 +289,9 @@ export const MessageInput = React.memo(({
                         return (
                             <div key={i} style={{ position: 'relative' }}>
                                 {isVideo ? (
-                                    <video src={`${serverUrl}${url}`} style={{ height: '60px', borderRadius: '4px' }} controls={false} />
+                                    <div style={{ height: '60px', borderRadius: '4px', overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.2)' }}>
+                                        <video src={`${serverUrl}${url}`} style={{ height: '100%', display: 'block', objectFit: 'contain' }} controls={false} playsInline />
+                                    </div>
                                 ) : (
                                     <img src={`${serverUrl}${url}`} alt="preview" style={{ height: '60px', borderRadius: '4px' }} />
                                 )}
@@ -288,7 +351,7 @@ export const MessageInput = React.memo(({
                             try {
                                 const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/attachments`, {
                                     method: 'POST',
-                                    headers: { 'X-Account-Id': currentAccount?.id || '' },
+                                    headers: { 'Authorization': `Bearer ${currentAccount?.token || ''}` },
                                     body: formData
                                 });
                                 if (!res.ok) {
@@ -329,8 +392,30 @@ export const MessageInput = React.memo(({
                                         ...serverProfiles,
                                         ...serverRoles
                                     ].filter(o => {
-                                        const name = 'color' in o ? o.name : o.nickname;
-                                        return name.toLowerCase().includes(filter.toLowerCase());
+                                        if ('color' in o) {
+                                            return o.name.toLowerCase().includes(filter.toLowerCase());
+                                        }
+                                        const nickMatch = o.nickname.toLowerCase().includes(filter.toLowerCase());
+                                        const userMatch = (o.original_username || '').toLowerCase().includes(filter.toLowerCase());
+                                        return nickMatch || userMatch;
+                                    }).sort((a, b) => {
+                                        const filterLower = filter.toLowerCase();
+                                        const aName = 'color' in a ? a.name.toLowerCase() : a.nickname.toLowerCase();
+                                        const bName = 'color' in b ? b.name.toLowerCase() : b.nickname.toLowerCase();
+                                        const aUser = 'color' in a ? '' : (a.original_username || '').toLowerCase();
+                                        const bUser = 'color' in b ? '' : (b.original_username || '').toLowerCase();
+
+                                        const aExact = aName === filterLower || aUser === filterLower;
+                                        const bExact = bName === filterLower || bUser === filterLower;
+                                        if (aExact && !bExact) return -1;
+                                        if (!aExact && bExact) return 1;
+
+                                        const aStarts = aName.startsWith(filterLower) || aUser.startsWith(filterLower);
+                                        const bStarts = bName.startsWith(filterLower) || bUser.startsWith(filterLower);
+                                        if (aStarts && !bStarts) return -1;
+                                        if (!aStarts && bStarts) return 1;
+
+                                        return aName.localeCompare(bName);
                                     });
                                     
                                     setFilteredOptions(options);

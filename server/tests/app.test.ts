@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
-import { createApp } from '../src/app';
+import { createApp, generateToken } from '../src/app';
 
 // Mock DB
 const mockDbManager = vi.hoisted(() => ({
@@ -34,6 +34,8 @@ vi.mock('fs', () => ({
 const mockBroadcast = vi.fn();
 
 const app = createApp(mockDbManager, mockBroadcast);
+const testToken = generateToken('acc1');
+const guestToken = generateToken('guest-123');
 
 describe('Harmony Express App (Split Architecture)', () => {
     beforeEach(() => {
@@ -56,7 +58,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         const fakeServers = [{ id: 'sv1', name: 'Server A' }];
         mockDbManager.getAllLoadedServers.mockResolvedValue(fakeServers);
 
-        const res = await request(app).get('/api/servers');
+        const res = await request(app).get('/api/servers').set('Authorization', `Bearer ${testToken}`);
         expect(res.status).toBe(200);
         expect(res.body).toEqual(fakeServers);
     });
@@ -65,7 +67,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         const fakeChannels = [{ id: '10', name: 'general' }];
         mockDbManager.allServerQuery.mockResolvedValue(fakeChannels);
 
-        const res = await request(app).get('/api/servers/sv1/channels');
+        const res = await request(app).get('/api/servers/sv1/channels').set('Authorization', `Bearer ${testToken}`);
         expect(res.status).toBe(200);
         expect(res.body).toEqual(fakeChannels);
         expect(mockDbManager.allServerQuery).toHaveBeenCalledWith('sv1', 'SELECT * FROM channels WHERE server_id = ? ORDER BY position ASC', ['sv1']);
@@ -76,7 +78,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         mockDbManager.allServerQuery.mockResolvedValue(fakeMessages);
         mockDbManager.allNodeQuery.mockResolvedValue([]); // Identity stitching mock
 
-        const res = await request(app).get('/api/channels/ch1/messages?limit=50&cursor=2024');
+        const res = await request(app).get('/api/channels/ch1/messages?limit=50&cursor=2024').set('Authorization', `Bearer ${testToken}`);
         expect(res.status).toBe(200);
 
         const callArgs = mockDbManager.allServerQuery.mock.calls[0];
@@ -91,7 +93,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         mockDbManager.allServerQuery.mockResolvedValue(fakeMessages);
         mockDbManager.allNodeQuery.mockResolvedValue([{ id: 'acc1', public_key: 'test_pub_key' }]);
 
-        const res = await request(app).get('/api/channels/ch1/messages');
+        const res = await request(app).get('/api/channels/ch1/messages').set('Authorization', `Bearer ${testToken}`);
         expect(res.status).toBe(200);
         expect(res.body[0].username).toBe('UnknownProfileOrRole');
         expect(res.body[0].public_key).toBe('test_pub_key');
@@ -101,7 +103,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         mockDbManager.runServerQuery.mockResolvedValue(undefined);
         mockDbManager.getServerQuery.mockImplementation(async (svr: string, query: string) => {
             if (query.includes('FROM channels') && !query.includes('server_id')) return { id: 'ch1', server_id: 'sv1' }; // findServerForChannel
-            if (query.includes('profiles')) return { username: 'bob', avatar: 'pic', account_id: 'acc1' };
+            if (query.includes('profiles')) return { id: 'p1', username: 'bob', avatar: 'pic', account_id: 'acc1', role: 'OWNER' };
             return null;
         });
         mockDbManager.getNodeQuery.mockImplementation(async (query: string) => {
@@ -110,7 +112,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         });
 
         const payload = { content: 'hello', authorId: 'u1' };
-        const res = await request(app).post('/api/channels/ch1/messages').send(payload);
+        const res = await request(app).post('/api/channels/ch1/messages?serverId=sv1').set('Authorization', `Bearer ${testToken}`).send(payload);
 
         expect(res.status).toBe(200);
         expect(res.body.content).toBe('hello');
@@ -137,7 +139,7 @@ describe('Harmony Express App (Split Architecture)', () => {
 
         const res = await request(app)
             .delete('/api/servers/sv1')
-            .set('X-Account-Id', 'acc1');
+            .set('Authorization', `Bearer ${testToken}`);
 
         expect(res.status).toBe(200);
         expect(mockDbManager.unloadServerInstance).toHaveBeenCalledWith('sv1');
@@ -170,7 +172,8 @@ describe('Harmony Express App (Split Architecture)', () => {
 
         const res = await request(app).post('/api/accounts/login').send({ email: 'test@test.com', serverAuthKey: 'authkey' });
         expect(res.status).toBe(200);
-        expect(res.body.email).toBe('test@test.com');
+        expect(res.body.public_key).toBe('pub');
+        expect(res.body.token).toBeDefined();
         expect(res.body.trusted_servers).toEqual(['http://trusted']);
     });
 
@@ -200,7 +203,7 @@ describe('Harmony Express App (Split Architecture)', () => {
         mockDbManager.allServerQuery.mockResolvedValue(fakeProfiles);
         mockDbManager.getAllLoadedServers.mockResolvedValue([{ id: 'sv1', name: 'Mock Server' }]);
 
-        const res = await request(app).get('/api/accounts/acc1/profiles');
+        const res = await request(app).get('/api/accounts/acc1/profiles').set('Authorization', `Bearer ${testToken}`);
         expect(res.status).toBe(200);
         expect(res.body).toEqual(fakeProfiles);
         expect(mockDbManager.allServerQuery).toHaveBeenCalledWith('sv1', 'SELECT * FROM profiles WHERE account_id = ?', ['acc1']);
@@ -259,7 +262,7 @@ describe('Harmony Express App (Split Architecture)', () => {
 
     it('POST /api/guest/merge should update profile account_id on a chosen server DB', async () => {
         mockDbManager.runServerQuery.mockResolvedValue(undefined);
-        const res = await request(app).post('/api/guest/merge').set('x-account-id', 'acc1').send({ profileId: 'p1', serverId: 's1', accountId: 'acc1' });
+        const res = await request(app).post('/api/guest/merge').set('Authorization', `Bearer ${testToken}`).send({ profileId: 'p1', serverId: 's1', accountId: 'acc1' });
         expect(res.status).toBe(200);
         expect(mockDbManager.runServerQuery).toHaveBeenCalledWith(
             's1',
@@ -271,7 +274,7 @@ describe('Harmony Express App (Split Architecture)', () => {
     describe('Roles & Permissions (Server Scoped)', () => {
         it('GET /api/servers/:serverId/roles should return all server roles', async () => {
             mockDbManager.allServerQuery.mockResolvedValue([{ id: 'r1', name: 'Admin', permissions: 1 }]);
-            const res = await request(app).get('/api/servers/s1/roles');
+            const res = await request(app).get('/api/servers/s1/roles').set('Authorization', `Bearer ${testToken}`);
             expect(res.status).toBe(200);
             expect(res.body).toEqual([{ id: 'r1', name: 'Admin', permissions: 1 }]);
         });
@@ -283,7 +286,7 @@ describe('Harmony Express App (Split Architecture)', () => {
                 return null;
             });
             const res = await request(app).post('/api/servers/s1/roles')
-                .set('x-account-id', 'acc1')
+                .set('Authorization', `Bearer ${testToken}`)
                 .send({ name: 'Moderator', permissions: 8, color: '#ff0000', position: 1 });
             expect(res.status).toBe(200);
             expect(mockDbManager.runServerQuery).toHaveBeenCalledWith(
@@ -307,7 +310,7 @@ describe('Harmony Express App (Split Architecture)', () => {
             mockDbManager.allServerQuery.mockResolvedValue([]); 
             mockDbManager.runServerQuery.mockResolvedValue(undefined);
 
-            const res = await request(app).delete('/api/channels/c1/messages/m1').set('x-account-id', 'acc1');
+            const res = await request(app).delete('/api/channels/c1/messages/m1').set('Authorization', `Bearer ${testToken}`);
             expect(res.status).toBe(200);
             expect(mockDbManager.runServerQuery).toHaveBeenCalledWith('sv1', 'DELETE FROM messages WHERE id = ?', ['m1']);
         });
@@ -326,8 +329,15 @@ describe('Harmony Express App (Split Architecture)', () => {
             mockDbManager.allServerQuery.mockResolvedValue([{ permissions: 64 }]);
             mockDbManager.runServerQuery.mockResolvedValue(undefined);
 
-            const res = await request(app).delete('/api/channels/c1/messages/m1').set('x-account-id', 'acc1');
+            const res = await request(app).delete('/api/channels/c1/messages/m1').set('Authorization', `Bearer ${testToken}`);
             expect(res.status).toBe(200);
+        });
+
+        it('should reject spoofed x-account-id without a valid token for deletion (401)', async () => {
+            const res = await request(app)
+                .delete('/api/channels/c1/messages/m1')
+                .set('x-account-id', 'other-acc');
+            expect(res.status).toBe(401);
         });
     });
 });

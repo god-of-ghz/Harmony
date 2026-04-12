@@ -1,4 +1,6 @@
 import { WebSocket } from 'ws';
+import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from './config';
 
 export interface PresenceData {
     accountId: string;
@@ -20,22 +22,31 @@ export const setupConnectionTracking = (ws: WebSocket, broadcastMessage: (messag
             const parsed = JSON.parse(message.toString());
             
             if (parsed.type === 'PRESENCE_IDENTIFY') {
-                const { accountId } = parsed.data;
-                socketAccountMap.set(ws, accountId);
-                
-                presenceMap.set(accountId, {
-                    accountId,
-                    status: 'online',
-                    lastUpdated: Date.now()
-                });
-                
-                broadcastMessage({ type: 'PRESENCE_UPDATE', data: presenceMap.get(accountId) });
-                
-                // Send sync of ALL presences to the newly connected client
-                ws.send(JSON.stringify({
-                    type: 'PRESENCE_SYNC',
-                    data: Array.from(presenceMap.values())
-                }));
+                const { token } = parsed.data;
+                if (!token) return;
+
+                try {
+                    const decoded = jwt.verify(token, JWT_SECRET) as { accountId: string };
+                    const { accountId } = decoded;
+                    
+                    socketAccountMap.set(ws, accountId);
+                    
+                    presenceMap.set(accountId, {
+                        accountId,
+                        status: 'online',
+                        lastUpdated: Date.now()
+                    });
+                    
+                    broadcastMessage({ type: 'PRESENCE_UPDATE', data: presenceMap.get(accountId) });
+                    
+                    // Send sync of ALL presences to the newly connected client
+                    ws.send(JSON.stringify({
+                        type: 'PRESENCE_SYNC',
+                        data: Array.from(presenceMap.values())
+                    }));
+                } catch (err) {
+                    console.error("WS Identity Verification Failed:", err);
+                }
             } 
             else if (parsed.type === 'PRESENCE_UPDATE') {
                 const accountId = socketAccountMap.get(ws);

@@ -90,7 +90,7 @@ describe('ServerSidebar Component', () => {
         fireEvent.click(plusButton);
         
         expect(screen.getByText('Join a Peer Server')).toBeInTheDocument();
-        expect(screen.getByPlaceholderText('http://localhost:3002')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('http://localhost:3002 or https://...')).toBeInTheDocument();
     });
 
     it('opens "Create Chat Server" modal when FolderPlus button is clicked', async () => {

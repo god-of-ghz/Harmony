@@ -15,7 +15,7 @@ vi.mock('../src/store/appStore', () => ({
 describe('ClaimProfile Component', () => {
     const mockAddClaimedProfile = vi.fn();
     const mockState = {
-        currentAccount: { id: 'account1' },
+        currentAccount: { id: 'account1', token: 'mock-token' },
         addClaimedProfile: mockAddClaimedProfile,
         serverMap: { 's1': 'http://localhost' },
         isGuestSession: false
@@ -121,6 +121,25 @@ describe('ClaimProfile Component', () => {
 
         await waitFor(() => {
             expect(screen.getByText('Server error')).toBeInTheDocument();
+        });
+    });
+
+    it('includes authorization header in API calls', async () => {
+        (global.fetch as any).mockImplementationOnce(() => 
+            Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
+        );
+
+        render(<ClaimProfile serverId="s1" />);
+
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/profiles'),
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        'Authorization': 'Bearer mock-token'
+                    })
+                })
+            );
         });
     });
 });

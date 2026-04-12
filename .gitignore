@@ -47,3 +47,11 @@ backup_*
 !package-lock.json
 *.db
 server/harmony.db
+client/userData*
+releases/
+server/release/
+scratch_*.js
+server/test_*.js
+*.log
+server/data/
+server/system_test_data/servers/

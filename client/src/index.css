@@ -300,3 +300,12 @@ a:hover {
   0%, 80%, 100% { opacity: 0.2; transform: scale(1); }
   40% { opacity: 1; transform: scale(1.2); }
 }
+
+/* Custom Emojis */
+.inline-emoji {
+  width: 22px;
+  height: 22px;
+  vertical-align: bottom;
+  object-fit: contain;
+  margin: 0 1px;
+}

@@ -1,54 +1,38 @@
-import { app, ipcMain, desktopCapturer, BrowserWindow } from "electron";
-import path from "path";
-import { fileURLToPath } from "url";
-const __filename$1 = fileURLToPath(import.meta.url);
-const __dirname$1 = path.dirname(__filename$1);
-const isDev = process.env.NODE_ENV === "development";
-app.commandLine.appendSwitch("disable-features", "WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer");
-const userDataPath = process.env.HARMONY_USER_DATA_DIR;
-if (userDataPath) {
-  const absolutePath = path.isAbsolute(userDataPath) ? userDataPath : path.join(process.cwd(), userDataPath);
-  app.setPath("userData", absolutePath);
+import { app as o, ipcMain as c, desktopCapturer as l, BrowserWindow as a, shell as d } from "electron";
+import r from "path";
+import { fileURLToPath as p } from "url";
+const h = p(import.meta.url), w = r.dirname(h), s = process.env.NODE_ENV === "development";
+o.commandLine.appendSwitch("disable-features", "WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer");
+const n = process.env.HARMONY_USER_DATA_DIR;
+if (n) {
+  const e = r.isAbsolute(n) ? n : r.join(process.cwd(), n);
+  o.setPath("userData", e);
 }
-function createWindow() {
-  const win = new BrowserWindow({
+function i() {
+  const e = new a({
     width: 1200,
     height: 800,
     title: "Harmony",
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webSecurity: false
+      nodeIntegration: !0,
+      contextIsolation: !1,
+      webSecurity: !1
     }
   });
-  if (!isDev) {
-    win.removeMenu();
-  }
-  if (isDev) {
-    win.loadURL("http://localhost:5173");
-  } else {
-    win.loadFile(path.join(__dirname$1, "../dist/index.html"));
-  }
+  s || e.removeMenu(), s ? e.loadURL("http://localhost:5173") : e.loadFile(r.join(w, "../dist/index.html")), e.webContents.setWindowOpenHandler(({ url: t }) => t.startsWith("http://") || t.startsWith("https://") ? (d.openExternal(t), { action: "deny" }) : { action: "allow" });
 }
-app.whenReady().then(() => {
-  ipcMain.handle("get-desktop-sources", async () => {
+o.whenReady().then(() => {
+  c.handle("get-desktop-sources", async () => {
     try {
-      const sources = await desktopCapturer.getSources({ types: ["screen"] });
-      return sources.map((s) => ({ id: s.id, name: s.name }));
+      return (await l.getSources({ types: ["screen"] })).map((t) => ({ id: t.id, name: t.name }));
     } catch (e) {
-      console.error("Failed to get sources", e);
-      return [];
+      return console.error("Failed to get sources", e), [];
     }
-  });
-  createWindow();
+  }), i();
 });
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+o.on("window-all-closed", () => {
+  process.platform !== "darwin" && o.quit();
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+o.on("activate", () => {
+  a.getAllWindows().length === 0 && i();
 });

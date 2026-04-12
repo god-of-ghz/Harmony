@@ -3,6 +3,7 @@ import { useWebRTC } from '../../hooks/useWebRTC';
 import type { QualityPreset, StreamMode } from '../../hooks/useWebRTC';
 import { Mic, MicOff, Video, VideoOff, MonitorUp, Settings, X } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
+import { convertToWsUrl } from '../../utils/url';
 
 interface Props {
     channelId: string;
@@ -12,7 +13,7 @@ interface Props {
 
 export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
     const { currentAccount } = useAppStore();
-    const wsUrl = serverUrl.replace(/^http/, 'ws');
+    const wsUrl = convertToWsUrl(serverUrl);
     
     // Stable peer ID to avoid WebRTC re-initialization on every render
     const [stableId] = useState(`anon-${Math.random().toString(36).substring(7)}`);

@@ -20,14 +20,16 @@ export const ServerSidebar = () => {
 
     const fetchServers = async () => {
         if (!currentAccount) return;
-        const allUrls = Array.from(new Set([...trustedServers, ...knownServers]));
+        const safeKnown = Array.isArray(knownServers) ? knownServers : [];
+        const safeTrusted = Array.isArray(trustedServers) ? trustedServers : [];
+        const allUrls = Array.from(new Set([...safeTrusted, ...safeKnown]));
         const serverResults: (ServerData[] | null)[] = new Array(allUrls.length).fill(null);
         const newMap: Record<string, string> = {};
         const allProfiles: any[] = [];
 
         await Promise.all(allUrls.map(async (url, index) => {
             try {
-                const res = await fetch(`${url}/api/servers`, { headers: { 'X-Account-Id': currentAccount.id } });
+                const res = await fetch(`${url}/api/servers`, { headers: { 'Authorization': `Bearer ${currentAccount.token}` } });
                 if (res.ok) {
                     const data = await res.json();
                     serverResults[index] = data;
@@ -35,7 +37,9 @@ export const ServerSidebar = () => {
                         if (!newMap[s.id]) newMap[s.id] = url;
                     }
                 }
-                const profRes = await fetch(`${url}/api/accounts/${currentAccount.id}/profiles`);
+                const profRes = await fetch(`${url}/api/accounts/${currentAccount.id}/profiles`, {
+                    headers: { 'Authorization': `Bearer ${currentAccount.token}` }
+                });
                 if (profRes.ok) {
                     const profiles = await profRes.json();
                     allProfiles.push(...profiles);
@@ -65,14 +69,16 @@ export const ServerSidebar = () => {
             return { claimedProfiles: unique };
         });
 
-        if (allServers.length > 0 && !useAppStore.getState().activeServerId) {
+        const showGlobalClaim = !useAppStore.getState().isGuestSession && !useAppStore.getState().dismissedGlobalClaim;
+
+        if (allServers.length > 0 && !useAppStore.getState().activeServerId && !showGlobalClaim) {
             setActiveServerId(allServers[0].id);
         }
     };
 
     useEffect(() => {
         fetchServers();
-    }, [currentAccount, knownServers.join(','), trustedServers.join(',')]);
+    }, [currentAccount, (Array.isArray(knownServers) ? knownServers.join(',') : ''), (Array.isArray(trustedServers) ? trustedServers.join(',') : '')]);
 
     useEffect(() => {
         const handleClick = () => setContextMenu(null);
@@ -107,7 +113,10 @@ export const ServerSidebar = () => {
         try {
             await fetch(`${homeServer}/api/accounts/${currentAccount?.id}/trusted_servers/reorder`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentAccount?.token}`
+                },
                 body: JSON.stringify({ trusted_servers: newUrls })
             });
         } catch (err) {
@@ -127,7 +136,7 @@ export const ServerSidebar = () => {
 
         fetch(`${sUrl}/api/servers/${serverId}`, {
             method: 'DELETE',
-            headers: { 'X-Account-Id': currentAccount.id }
+            headers: { 'Authorization': `Bearer ${currentAccount.token}` }
         })
             .then(res => res.json())
             .then(result => {
@@ -152,7 +161,10 @@ export const ServerSidebar = () => {
             const homeServer = knownServers[0] || trustedServers[0];
             const res = await fetch(`${homeServer}/api/accounts/${currentAccount.id}/trusted_servers`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${currentAccount.token}` 
+                },
                 body: JSON.stringify({ serverUrl: targetUrl })
             });
 
@@ -190,7 +202,10 @@ export const ServerSidebar = () => {
         try {
             const res = await fetch(`${homeServer}/api/servers`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${currentAccount.token}` 
+                },
                 body: JSON.stringify({ name: newServerName.trim() })
             });
 
@@ -334,7 +349,7 @@ export const ServerSidebar = () => {
                                     method: 'POST',
                                     headers: {
                                         'Content-Type': 'application/json',
-                                        'X-Account-Id': currentAccount.id
+                                        'Authorization': `Bearer ${currentAccount.token}`
                                     },
                                     body: JSON.stringify({ path })
                                 }).then(() => alert("Import triggered! Check server logs."));
@@ -383,7 +398,7 @@ export const ServerSidebar = () => {
                         <form onSubmit={handleAddServer} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                             <input
                                 type="url"
-                                placeholder="http://localhost:3002"
+                                placeholder="http://localhost:3002 or https://..."
                                 required
                                 value={newServerUrl}
                                 onChange={e => setNewServerUrl(e.target.value)}

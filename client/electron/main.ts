@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, session, ipcMain } from 'electron';
+import { app, BrowserWindow, desktopCapturer, session, ipcMain, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -43,6 +43,15 @@ function createWindow() {
         // Vite builds to 'dist', Electron runs from 'dist-electron'
         win.loadFile(path.join(__dirname, '../dist/index.html'));
     }
+
+    // Intercept target="_blank" links and open them in the user's default external browser
+    win.webContents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            shell.openExternal(url);
+            return { action: 'deny' };
+        }
+        return { action: 'allow' };
+    });
 }
 
 app.whenReady().then(() => {

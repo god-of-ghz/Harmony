@@ -13,7 +13,6 @@ export const ChannelSidebar = () => {
         activeVoiceChannelId, 
         setActiveVoiceChannelId, 
         unreadChannels,
-        currentUserPermissions,
         setCurrentUserPermissions,
         currentAccount,
         claimedProfiles
@@ -43,11 +42,18 @@ export const ChannelSidebar = () => {
             return;
         }
 
-        fetch(`${baseUrl}/api/servers/${activeServerId}/profiles/${profile.id}/roles`)
-            .then(r => r.json())
+        fetch(`${baseUrl}/api/servers/${activeServerId}/profiles/${profile.id}/roles`, {
+            headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+        })
+            .then(async r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
             .then(roles => {
                 let perms = 0;
-                roles.forEach((r: any) => perms |= r.permissions);
+                if (Array.isArray(roles)) {
+                    roles.forEach((r: any) => perms |= r.permissions);
+                }
                 if (profile.role === 'OWNER') perms |= Permission.ADMINISTRATOR;
                 setCurrentUserPermissions(perms);
             })
@@ -67,19 +73,24 @@ export const ChannelSidebar = () => {
         const baseUrl = serverMap[activeServerId];
         if (!baseUrl) return;
 
+        const authHeaders = { 'Authorization': `Bearer ${currentAccount?.token}` };
+
         Promise.all([
-            fetch(`${baseUrl}/api/servers/${activeServerId}/categories`).then(r => r.json()),
-            fetch(`${baseUrl}/api/servers/${activeServerId}/channels`).then(r => r.json())
+            fetch(`${baseUrl}/api/servers/${activeServerId}/categories`, { headers: authHeaders }).then(r => r.ok ? r.json() : []),
+            fetch(`${baseUrl}/api/servers/${activeServerId}/channels`, { headers: authHeaders }).then(r => r.ok ? r.json() : [])
         ])
             .then(([catsData, chansData]) => {
-                setCategories(catsData);
-                setChannels(chansData);
-                if (chansData.length > 0 && !activeChannelId) {
-                    setActiveChannelId(chansData[0].id, chansData[0].name);
+                const safeCats = Array.isArray(catsData) ? catsData : [];
+                const safeChans = Array.isArray(chansData) ? chansData : [];
+                setCategories(safeCats);
+                setChannels(safeChans);
+                if (safeChans.length > 0 && !activeChannelId) {
+                    setActiveChannelId(safeChans[0].id, safeChans[0].name);
                 }
             })
             .catch(console.error);
-    }, [activeServerId, refreshTrigger]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeServerId, refreshTrigger, serverMap, currentAccount]);
 
     const toggleCategory = (categoryId: string) => {
         setCollapsedCategories(prev => ({
@@ -107,11 +118,9 @@ export const ChannelSidebar = () => {
         <div style={{ width: 'var(--channel-sidebar-width)', backgroundColor: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px', borderBottom: '1px solid var(--divider)', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>Server Configuration</span>
-                {(currentUserPermissions & (Permission.MANAGE_SERVER | Permission.ADMINISTRATOR)) !== 0 && (
-                    <Settings data-testid="settings-gear" size={18} style={{ cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setShowSettings(true)} />
-                )}
+                <Settings data-testid="settings-gear" size={18} style={{ cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setShowSettings(true)} />
             </div>
-            <div style={{ padding: '12px 0 12px 8px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, overflowY: 'auto' }}>
+            <div style={{ padding: '12px 0 12px 8px', display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto' }}>
                 {uncategorizedChannels.map(channel => {
                     const isVoice = channel.type === 'voice';
                     const isSelected = isVoice ? activeVoiceChannelId === channel.id : activeChannelId === channel.id;
@@ -135,7 +144,8 @@ export const ChannelSidebar = () => {
                                 alignItems: 'flex-start',
                                 gap: '6px',
                                 backgroundColor: isSelected ? 'var(--bg-modifier-selected)' : 'transparent',
-                                color: isSelected ? 'var(--interactive-active)' : 'var(--interactive-normal)'
+                                color: isSelected ? 'var(--interactive-active)' : 'var(--interactive-normal)',
+                                marginBottom: '2px'
                             }}
                         >
                             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', flex: 1, paddingTop: '2px' }}>
@@ -150,7 +160,7 @@ export const ChannelSidebar = () => {
                 })}
 
                 {categorizedChannels.map((category, index) => (
-                    <div key={category.id} style={{ display: 'flex', flexDirection: 'column', marginTop: index === 0 && uncategorizedChannels.length === 0 ? '0px' : '16px' }}>
+                    <div key={category.id} style={{ display: 'flex', flexDirection: 'column', marginTop: index === 0 && uncategorizedChannels.length === 0 ? '0px' : '12px' }}>
                         <div
                             onClick={() => toggleCategory(category.id)}
                             style={{
@@ -196,7 +206,8 @@ export const ChannelSidebar = () => {
                                                 alignItems: 'flex-start',
                                                 gap: '6px',
                                                 backgroundColor: isSelected ? 'var(--bg-modifier-selected)' : 'transparent',
-                                                color: isSelected ? 'var(--interactive-active)' : 'var(--interactive-normal)'
+                                                color: isSelected ? 'var(--interactive-active)' : 'var(--interactive-normal)',
+                                                marginBottom: '2px'
                                             }}
                                         >
                                             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', flex: 1, paddingTop: '2px' }}>

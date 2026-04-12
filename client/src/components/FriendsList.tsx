@@ -14,9 +14,9 @@ export const FriendsList = () => {
     useEffect(() => {
         if (!currentAccount || !homeServer) return;
         fetch(`${homeServer}/api/accounts/relationships`, {
-            headers: { 'X-Account-Id': currentAccount.id }
+            headers: { 'Authorization': `Bearer ${currentAccount.token}` }
         })
-        .then(res => res.json())
+        .then(res => res.ok ? res.json() : [])
         .then(data => {
             if (Array.isArray(data)) setRelationships(data);
         })
@@ -30,10 +30,12 @@ export const FriendsList = () => {
             .filter(id => !globalProfiles[id]);
 
         missingProfiles.forEach(id => {
-            fetch(`${homeServer}/api/accounts/${id}/profile`)
-                .then(res => res.json())
+            fetch(`${homeServer}/api/accounts/${id}/profile`, {
+                headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+            })
+                .then(res => res.ok ? res.json() : null)
                 .then(profile => {
-                    useAppStore.getState().updateGlobalProfile(profile);
+                    if (profile) useAppStore.getState().updateGlobalProfile(profile);
                 })
                 .catch(console.error);
         });
@@ -49,7 +51,7 @@ export const FriendsList = () => {
         try {
             const res = await fetch(`${homeServer}/api/accounts/relationships/request`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentAccount.token}` },
                 body: JSON.stringify({ targetId: addInput.trim() })
             });
             const data = await res.json();
@@ -66,7 +68,7 @@ export const FriendsList = () => {
         try {
             const res = await fetch(`${homeServer}/api/accounts/relationships/accept`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-Account-Id': currentAccount.id },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentAccount.token}` },
                 body: JSON.stringify({ targetId })
             });
             if (!res.ok) throw new Error('Failed to accept');
@@ -80,7 +82,7 @@ export const FriendsList = () => {
         try {
             const res = await fetch(`${homeServer}/api/accounts/relationships/${targetId}`, {
                 method: 'DELETE',
-                headers: { 'X-Account-Id': currentAccount.id }
+                headers: { 'Authorization': `Bearer ${currentAccount.token}` }
             });
             if (!res.ok) throw new Error('Failed to remove');
         } catch (err: any) {

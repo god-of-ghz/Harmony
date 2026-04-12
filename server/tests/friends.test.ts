@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '../src/app';
+import { createApp, generateToken } from '../src/app';
+
+const testToken = generateToken('acc1');
 
 // Mock DB 
 const mockDbManager = vi.hoisted(() => ({
@@ -32,7 +34,7 @@ describe('Friends & Relationships (Node DB)', () => {
         mockDbManager.getNodeQuery.mockResolvedValue(null);
         mockDbManager.runNodeQuery.mockResolvedValue(undefined);
 
-        const res = await request(app).post('/api/accounts/relationships/request').set('x-account-id', 'acc1').send({ targetId: 'acc2' });
+        const res = await request(app).post('/api/accounts/relationships/request').set('Authorization', `Bearer ${testToken}`).send({ targetId: 'acc2' });
         expect(res.status).toBe(200);
         expect(mockDbManager.getNodeQuery).toHaveBeenCalled();
         expect(mockDbManager.runNodeQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO relationships'), ['acc1', 'acc2', 'pending', expect.any(Number)]);
@@ -42,7 +44,7 @@ describe('Friends & Relationships (Node DB)', () => {
     it('PUT /api/accounts/relationships/accept accepts a friend request', async () => {
         mockDbManager.runNodeQuery.mockResolvedValue(undefined);
 
-        const res = await request(app).put('/api/accounts/relationships/accept').set('x-account-id', 'acc1').send({ targetId: 'acc2' });
+        const res = await request(app).put('/api/accounts/relationships/accept').set('Authorization', `Bearer ${testToken}`).send({ targetId: 'acc2' });
         expect(res.status).toBe(200);
         expect(mockDbManager.runNodeQuery).toHaveBeenCalledWith(expect.stringContaining('UPDATE relationships SET status'), ['friend', 'acc2', 'acc1', 'pending']);
         expect(mockBroadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'RELATIONSHIP_UPDATE', data: { account_id: 'acc2', target_id: 'acc1', status: 'friend' } }));
@@ -51,7 +53,7 @@ describe('Friends & Relationships (Node DB)', () => {
     it('DELETE /api/accounts/relationships/:targetId removes a relationship', async () => {
         mockDbManager.runNodeQuery.mockResolvedValue(undefined);
 
-        const res = await request(app).delete('/api/accounts/relationships/acc2').set('x-account-id', 'acc1');
+        const res = await request(app).delete('/api/accounts/relationships/acc2').set('Authorization', `Bearer ${testToken}`);
         expect(res.status).toBe(200);
         expect(mockDbManager.runNodeQuery).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM relationships'), ['acc1', 'acc2', 'acc2', 'acc1']);
         expect(mockBroadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'RELATIONSHIP_UPDATE', data: { account_id: 'acc1', target_id: 'acc2', status: 'none' } }));

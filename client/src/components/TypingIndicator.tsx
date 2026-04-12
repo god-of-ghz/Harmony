@@ -72,7 +72,7 @@ export const TypingIndicator = React.memo(({
     else text = <span><strong>{names[0]}</strong>, <strong>{names[1]}</strong> and {names.length - 2} others are typing...</span>;
 
     return (
-        <div style={{ height: '24px', display: 'flex', alignItems: 'center', padding: '0 16px', marginBottom: '4px' }}>
+        <div style={{ height: '24px', display: 'flex', alignItems: 'center', padding: '0 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', marginRight: '8px' }}>
                 <MoreHorizontal size={24} style={{ color: 'var(--text-muted)' }} />
             </div>
