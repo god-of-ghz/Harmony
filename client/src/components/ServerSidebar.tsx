@@ -398,7 +398,7 @@ export const ServerSidebar = () => {
                         <form onSubmit={handleAddServer} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                             <input
                                 type="url"
-                                placeholder="http://localhost:3002 or https://..."
+                                placeholder="https://localhost:3002 or https://..."
                                 required
                                 value={newServerUrl}
                                 onChange={e => setNewServerUrl(e.target.value)}

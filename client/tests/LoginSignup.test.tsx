@@ -134,7 +134,7 @@ describe('LoginSignup Component', () => {
 
         // Verify the correct endpoint was called with a PUT and the new PAKE fields
         expect(global.fetch).toHaveBeenCalledWith(
-            'http://localhost:3001/api/accounts/password',
+            'https://localhost:3001/api/accounts/password',
             expect.objectContaining({
                 method: 'PUT',
                 body: expect.stringContaining('serverAuthKey')
@@ -145,7 +145,7 @@ describe('LoginSignup Component', () => {
     it('updates local state for the custom Network Server URL', () => {
         render(<LoginSignup />);
         // Find the server URL input by its placeholder text
-        const urlInput = screen.getByPlaceholderText('http://localhost:3001 or https://example.com');
+        const urlInput = screen.getByPlaceholderText('https://localhost:3001 or https://example.com');
 
         fireEvent.change(urlInput, { target: { value: 'http://96.230.218.248:3001' } });
         expect(urlInput).toHaveValue('http://96.230.218.248:3001');

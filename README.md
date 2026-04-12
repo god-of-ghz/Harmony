@@ -18,7 +18,7 @@ This massive update revolves around data independence and server migration! Brin
 
 ### 🔒 Security & Privacy (E2EE)
 - **End-to-End Encryption:** Your messages stay exclusively yours. Harmony now features full client-side E2EE message payload encryption using ECDH (Elliptic-curve Diffie–Hellman) for key exchange and AES-GCM for secure data wrapping.
-- **Native HTTPS & WSS:** The Harmony scalable backend inherently detects and supports `cert.pem` and `key.pem` configurations to enforce strict TLS over API requests and active WebSocket connections.
+- **Auto-Provisioned HTTPS & WSS:** The Harmony backend now securely runs on HTTPS by default using PKIjs! It automatically generates self-signed certificates (`cert.pem` and `key.pem`) on boot, ensuring all API requests and WebSockets are routed securely over TLS without any manual networking setup.
 
 ### ⚡ UI/UX Polish & Client Reliability
 - **Client State Persistence:** You won't get lost anymore! The Harmony app now saves your active navigation path — automatically dropping you into your last-visited guild and channel upon login or refresh.

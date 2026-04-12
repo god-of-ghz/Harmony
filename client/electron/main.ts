@@ -11,6 +11,8 @@ const isDev = process.env.NODE_ENV === 'development';
 // This forces Electron/WebRTC to fallback to the stable DXGI screen capture engine.
 app.commandLine.appendSwitch('disable-features', 'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer');
 
+
+
 // Support multiple isolated sessions by providing a custom user data directory via env var
 const userDataPath = process.env.HARMONY_USER_DATA_DIR;
 if (userDataPath) {
@@ -55,6 +57,22 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+    // Intercept certificate errors for all renderer requests (including fetch and DataChannels)
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+        const hostname = request.hostname;
+        const isLocalNetwork = hostname === 'localhost' || 
+                               hostname === '127.0.0.1' || 
+                               hostname.startsWith('192.168.') || 
+                               hostname.startsWith('10.') || 
+                               /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname);
+
+        if (isLocalNetwork) {
+            callback(0); // Accept certificate (net::OK)
+        } else {
+            callback(-3); // Fallback to default Chromium verification (net::ERR_CERT_AUTHORITY_INVALID if untrusted)
+        }
+    });
+
     // Handle screen share requests natively in Electron
     ipcMain.handle('get-desktop-sources', async () => {
         try {

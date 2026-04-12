@@ -10,6 +10,7 @@ import path from 'path';
 import { startMediasoup } from './media/sfu';
 import { setupWebRTC } from './media/signaling';
 import { setupConnectionTracking } from './websocket';
+import { getOrGenerateCerts } from './certs';
 
 const importArgIndex = process.argv.findIndex(arg => arg === '--import' || arg === 'import');
 const elevateArgIndex = process.argv.findIndex(arg => arg === '--elevate' || arg === 'elevate');
@@ -73,25 +74,20 @@ if (importArgIndex !== -1) {
     const startServer = async () => {
         await startMediasoup().catch(console.error);
         
-        const useHttps = process.env.USE_HTTPS === 'true';
+        const useHttps = process.env.USE_HTTPS !== 'false';
         let server: http.Server | https.Server;
         let protocol = 'http';
 
         if (useHttps) {
             try {
-                const keyPath = path.join(process.cwd(), 'key.pem');
-                const certPath = path.join(process.cwd(), 'cert.pem');
+                const certs = await getOrGenerateCerts();
                 
-                if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
-                    const options = {
-                        key: fs.readFileSync(keyPath),
-                        cert: fs.readFileSync(certPath)
-                    };
-                    server = https.createServer(options);
+                if (certs) {
+                    server = https.createServer({ key: certs.key, cert: certs.cert });
                     protocol = 'https';
-                    console.log("TLS/HTTPS enabled: Loaded cert.pem and key.pem");
+                    console.log("TLS/HTTPS enabled: Loaded or generated cert.pem and key.pem");
                 } else {
-                    console.warn("HTTPS requested but cert.pem or key.pem not found. Falling back to HTTP.");
+                    console.warn("HTTPS initialization failed. Falling back to HTTP.");
                     server = http.createServer();
                 }
             } catch (err) {

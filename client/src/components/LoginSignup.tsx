@@ -17,7 +17,7 @@ export const LoginSignup = () => {
     const [shouldClaimOwnership, setShouldClaimOwnership] = useState(false);
 
     const { setCurrentAccount, setClaimedProfiles, knownServers, addKnownServer, setTrustedServers, setIsGuestSession, setSessionPrivateKey } = useAppStore();
-    const [initialServerUrl, setInitialServerUrl] = useState(knownServers[0] || 'http://localhost:3001');
+    const [initialServerUrl, setInitialServerUrl] = useState(knownServers[0] || 'https://localhost:3001');
 
     const fetchOwnerStatus = async (baseUrl: string) => {
         try {
@@ -380,7 +380,7 @@ export const LoginSignup = () => {
                         type="text"
                         value={initialServerUrl}
                         onChange={e => setInitialServerUrl(e.target.value)}
-                        placeholder="http://localhost:3001 or https://example.com"
+                        placeholder="https://localhost:3001 or https://example.com"
                         style={{
                             width: '100%', backgroundColor: 'var(--bg-tertiary)', border: 'none', borderRadius: '3px',
                             color: 'var(--text-normal)', padding: '8px', fontSize: '12px', outline: 'none', marginTop: '4px',

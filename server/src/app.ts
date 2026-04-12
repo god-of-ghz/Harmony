@@ -17,8 +17,11 @@ export const createApp = (db: any, broadcastMessage: (v: any) => void) => {
     const app = express();
     const allowedOrigins = [
         'http://localhost:3000',
+        'https://localhost:3000',
         ...Array.from({ length: 10 }, (_, i) => `http://localhost:${3001 + i}`),
-        ...Array.from({ length: 10 }, (_, i) => `http://localhost:${5173 + i}`)
+        ...Array.from({ length: 10 }, (_, i) => `https://localhost:${3001 + i}`),
+        ...Array.from({ length: 10 }, (_, i) => `http://localhost:${5173 + i}`),
+        ...Array.from({ length: 10 }, (_, i) => `https://localhost:${5173 + i}`)
     ];
 
     app.use(cors({
