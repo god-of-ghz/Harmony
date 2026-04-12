@@ -76,6 +76,8 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const [isJumping, setIsJumping] = useState(false);
     const [isInitialLoading, setIsInitialLoading] = useState(false);
+    // jumpKey forces Virtuoso to remount when a jump occurs, so initialTopMostItemIndex takes effect
+    const [jumpKey, setJumpKey] = useState(0);
 
     useEffect(() => {
         if (activeChannelId) {
@@ -89,9 +91,10 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         let timer: ReturnType<typeof setTimeout>;
         if (jumpToMessageId) {
             setIsJumping(true);
+            // Force Virtuoso to remount so initialTopMostItemIndex positions the target correctly
+            setJumpKey(prev => prev + 1);
         } else {
             // Keep followOutput disabled for 1.5 seconds after jump finishes
-            // to prevent Virtuoso from snapping to the bottom due to deferred followOutput state checks.
             timer = setTimeout(() => {
                 setIsJumping(false);
             }, 1500);
@@ -148,30 +151,24 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         }
     }), [firstItemIndex, listItems.length]);
 
+    // Jump completion: after Virtuoso remounts at the target position, fire onJumpComplete to highlight and clean up
     useEffect(() => {
-        if (jumpToMessageId && listItems.length > 0) {
-            requestAnimationFrame(() => {
-                setTimeout(() => {
-                    const index = listItems.findIndex(item => item.msg.id === jumpToMessageId);
-                    if (index !== -1) {
-                        virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + index, align: 'center', behavior: 'auto' });
-                        setTimeout(() => {
-                            onJumpComplete?.(jumpToMessageId);
-                        }, 50);
-                    }
-                }, 100);
-            });
+        if (jumpToMessageId && listItems.length > 0 && targetIndex !== -1) {
+            const timer = setTimeout(() => {
+                onJumpComplete?.(jumpToMessageId);
+            }, 500);
+            return () => clearTimeout(timer);
         }
-    }, [jumpToMessageId, listItems, firstItemIndex, onJumpComplete]);
+    }, [jumpToMessageId, listItems, targetIndex, onJumpComplete]);
 
     const lastScrolledChannelId = useRef<string | null>(null);
 
     useEffect(() => {
         if (activeChannelId && listItems.length > 0 && lastScrolledChannelId.current !== activeChannelId) {
             metadataCache.clear();
-            // Check immediately if we are handling a jump. If so, completely skip the scroll-to-bottom timeout.
+            // Check immediately if we are handling a jump. If so, completely skip the scroll-to-bottom.
             const pendingJump = useAppStore.getState().pendingJump;
-            if (pendingJump || jumpToMessageId) {
+            if (pendingJump || jumpToMessageId || isJumping) {
                 lastScrolledChannelId.current = activeChannelId;
                 return;
             }
@@ -179,12 +176,12 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
             const timer = setTimeout(() => {
                 virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + listItems.length - 1, align: 'end', behavior: 'auto' });
                 lastScrolledChannelId.current = activeChannelId;
-            }, 150); // Increased delay slightly for layout stability
+            }, 150);
             return () => clearTimeout(timer);
         } else if (!activeChannelId) {
             lastScrolledChannelId.current = null;
         }
-    }, [activeChannelId, listItems.length, firstItemIndex, jumpToMessageId]);
+    }, [activeChannelId, listItems.length, firstItemIndex, jumpToMessageId, isJumping]);
 
     const renderItem = useCallback((_index: number, item: ListItem) => {
         const msg = item.msg;
@@ -239,20 +236,25 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         return <div style={{ flex: 1, backgroundColor: 'var(--bg-primary)' }} />;
     }
 
+    // Determine where to start rendering:
+    // - If jumping, position target at the top of the viewport
+    // - Otherwise, start at the bottom (most recent messages)
+    const initialIndex = targetIndex !== -1 ? targetIndex : listItems.length - 1;
+
     return (
         <Virtuoso
-            key={activeChannelId || 'none'}
+            key={`${activeChannelId || 'none'}-${jumpKey}`}
             ref={virtuosoRef}
             firstItemIndex={firstItemIndex}
             data={listItems}
             itemContent={renderItem}
             computeItemKey={(_index, item) => item.msg.id}
-            followOutput={isJumping || isLoadingMore ? false : (isInitialLoading ? true : "auto")}
-            alignToBottom={true}
-            atBottomThreshold={150} // More forgiving for dynamic shifts when near the bottom
-            increaseViewportBy={500} // More aggressive pre-rendering for smoothness
+            followOutput={(isJumping || isLoadingMore) ? false : (isInitialLoading ? true : "auto")}
+            alignToBottom={targetIndex === -1}
+            atBottomThreshold={150}
+            increaseViewportBy={500}
             startReached={onLoadMore}
-            initialTopMostItemIndex={targetIndex !== -1 ? firstItemIndex + targetIndex : firstItemIndex + listItems.length - 1} // Fallback for initial load
+            initialTopMostItemIndex={initialIndex}
             data-testid="scroll-container"
             components={{
                 Header: () => isLoadingMore ? <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '8px' }}>Loading older messages...</div> : null,

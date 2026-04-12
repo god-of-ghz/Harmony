@@ -36,6 +36,7 @@ export const ChatArea = () => {
     // Editing state
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [editValue, setEditValue] = useState('');
+    const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
 
     const [replyingTo, setReplyingTo] = useState<MessageData | null>(null);
     const [activeEmojiPickerId, setActiveEmojiPickerId] = useState<string | null>(null);
@@ -120,6 +121,7 @@ export const ChatArea = () => {
                     setMessages(decrypted);
                     setHasMoreMessages(true);
                     setJumpToMessageId(messageId);
+                    // Do NOT clear pendingJump here — onJumpComplete clears it after scroll finishes
                 })
                 .catch(console.error);
             return;
@@ -274,9 +276,13 @@ export const ChatArea = () => {
     }, [isLoadingMore, hasMoreMessages, activeChannelId, activeServerId, serverMap]);
 
     const handleCopyLink = useCallback((msgId: string) => {
-        const link = `${window.location.origin}/#/server/${activeServerId}/channels/${activeChannelId}/messages/${msgId}`;
+        let base = window.location.origin;
+        if (base === 'file://' || base.includes('tauri://') || window.location.protocol === 'file:') {
+            base = serverMap[activeServerId!] || base;
+        }
+        const link = `${base}/#/server/${activeServerId}/channels/${activeChannelId}/messages/${msgId}`;
         navigator.clipboard.writeText(link).then(() => { });
-    }, [activeServerId, activeChannelId]);
+    }, [activeServerId, activeChannelId, serverMap]);
 
     const handleAddReaction = useCallback(async (messageId: string, emoji: string) => {
         if (!activeChannelId || !activeServerId) return;
@@ -316,8 +322,11 @@ export const ChatArea = () => {
         setEditingMessageId(null);
     }, [editValue, activeChannelId, activeServerId, serverMap, sessionPrivateKey]);
 
-    const onDelete = useCallback(async (messageId: string) => {
-        if (!activeChannelId || !window.confirm("Are you sure you want to delete this message?")) return;
+    const confirmDelete = useCallback(async () => {
+        if (!messageToDelete || !activeChannelId) return;
+
+        const messageId = messageToDelete;
+        setMessageToDelete(null);
 
         fetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages/${messageId}`, {
             method: 'DELETE',
@@ -325,7 +334,12 @@ export const ChatArea = () => {
         }).then(() => {
             setMessages((prev: MessageData[]) => prev.filter((m: MessageData) => m.id !== messageId));
         }).catch(console.error);
-    }, [activeChannelId, activeServerId, serverMap]);
+    }, [messageToDelete, activeChannelId, activeServerId, serverMap]);
+
+    const onDelete = useCallback(async (messageId: string) => {
+        if (!activeChannelId) return;
+        setMessageToDelete(messageId);
+    }, [activeChannelId]);
 
     const handleJumpToMessage = useCallback(async (serverId: string, channelId: string, messageId: string) => {
         if (activeChannelId === channelId) {
@@ -349,15 +363,44 @@ export const ChatArea = () => {
                 setMessages(data);
                 setHasMoreMessages(true);
                 setJumpToMessageId(messageId);
+                // Do NOT clear pendingJump here — onJumpComplete clears it after scroll finishes
             } catch (e) {
                 console.error(e);
             }
             return;
         }
-        
+        if (serverId !== activeServerId) {
+            useAppStore.getState().setActiveServerId(serverId);
+        }
+
+        try {
+            const res = await fetch(`${serverMap[serverId]}/api/servers/${serverId}/channels`, {
+                headers: { 'Authorization': `Bearer ${useAppStore.getState().currentAccount?.token}` }
+            });
+            if (res.ok) {
+                const channels = await res.json();
+                const channel = channels.find((c: any) => c.id === channelId);
+                useAppStore.getState().setPendingJump({ channelId, messageId });
+                useAppStore.getState().setActiveChannelId(channelId, channel ? channel.name : '');
+                return;
+            }
+        } catch (e) {
+            console.error('Failed to fetch channel name for jump', e);
+        }
+
         useAppStore.getState().setPendingJump({ channelId, messageId });
         useAppStore.getState().setActiveChannelId(channelId);
     }, [activeChannelId, activeServerId, serverMap]);
+
+    useEffect(() => {
+        const handleJumpEvent = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            const { serverId, channelId, messageId } = customEvent.detail;
+            handleJumpToMessage(serverId, channelId, messageId);
+        };
+        window.addEventListener('harmony-jump', handleJumpEvent);
+        return () => window.removeEventListener('harmony-jump', handleJumpEvent);
+    }, [handleJumpToMessage]);
 
 
     if (!activeChannelId) {
@@ -483,6 +526,33 @@ export const ChatArea = () => {
         <SearchSidebar 
             onJumpToMessage={handleJumpToMessage}
         />
+
+        {messageToDelete && (
+            <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+                <div style={{
+                    backgroundColor: 'var(--bg-primary)', padding: '24px', borderRadius: '8px',
+                    width: '400px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)', border: '1px solid var(--divider)'
+                }}>
+                    <h3 style={{ margin: '0 0 16px 0', color: 'var(--header-primary)' }}>Delete Message</h3>
+                    <p style={{ margin: '0 0 24px 0', color: 'var(--text-normal)' }}>Are you sure you want to delete this message? This action cannot be undone.</p>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                        <button 
+                            onClick={() => setMessageToDelete(null)}
+                            style={{ padding: '8px 16px', background: 'var(--bg-modifier-selected)', color: 'var(--text-normal)', border: 'none', cursor: 'pointer', borderRadius: '4px' }}
+                        >Cancel</button>
+                        <button 
+                            onClick={confirmDelete}
+                            style={{ padding: '8px 16px', background: 'var(--status-danger)', color: 'white', border: 'none', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold' }}
+                        >Delete</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         </div>
     );
 };

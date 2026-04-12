@@ -99,6 +99,7 @@ class DatabaseManager {
           encrypted_private_key TEXT NOT NULL,
           key_salt TEXT NOT NULL,
           key_iv TEXT NOT NULL,
+          pake_salt TEXT DEFAULT '',
           is_creator BOOLEAN DEFAULT 0,
           is_admin BOOLEAN DEFAULT 0,
           updated_at INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER))
@@ -126,6 +127,10 @@ class DatabaseManager {
       `);
 
       dbObj.run("ALTER TABLE accounts ADD COLUMN is_admin BOOLEAN DEFAULT 0", (err) => {
+        if (err && !err.message.includes('duplicate column name')) {}
+      });
+
+      dbObj.run("ALTER TABLE accounts ADD COLUMN pake_salt TEXT DEFAULT ''", (err) => {
         if (err && !err.message.includes('duplicate column name')) {}
       });
 

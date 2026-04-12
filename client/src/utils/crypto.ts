@@ -1,4 +1,4 @@
-export const ITERATIONS = 100_000;
+export const ITERATIONS = 600_000;
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
@@ -23,12 +23,7 @@ export async function generateSalt(length = 16): Promise<string> {
     return arrayBufferToBase64(salt.buffer);
 }
 
-export async function getDeterministicSalt(email: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(email.toLowerCase().trim() + "_harmony_pake_v1");
-    const hash = await window.crypto.subtle.digest("SHA-256", data);
-    return arrayBufferToBase64(hash);
-}
+
 
 export async function generateIdentity() {
     return await window.crypto.subtle.generateKey(

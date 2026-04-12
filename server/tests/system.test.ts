@@ -78,7 +78,8 @@ describe('Harmony Server System Tests', () => {
             public_key: publicKey.toString('base64'),
             encrypted_private_key: 'MOCK_ENC_PRIV',
             key_salt: 'salt',
-            key_iv: 'iv'
+            key_iv: 'iv',
+            pake_salt: 'random_pake_salt_a'
         };
         const res = await request(app).post('/api/accounts/signup').send(payload);
         expect(res.status).toBe(200);
@@ -190,7 +191,8 @@ describe('Harmony Server System Tests', () => {
             public_key: 'USER_B_PUB_KEY',
             encrypted_private_key: 'USER_B_ENC_PRIV',
             key_salt: 'salt_b',
-            key_iv: 'iv_b'
+            key_iv: 'iv_b',
+            pake_salt: 'random_pake_salt_b'
         };
         const signupB = await request(app).post('/api/accounts/signup').send(userBPayload);
         expect(signupB.status).toBe(200);
@@ -284,7 +286,8 @@ describe('Harmony Server System Tests', () => {
             public_key: 'USER_C_PUB_KEY',
             encrypted_private_key: 'USER_C_ENC_PRIV',
             key_salt: 'salt_c',
-            key_iv: 'iv_c'
+            key_iv: 'iv_c',
+            pake_salt: 'random_pake_salt_c'
         };
         const signupC = await request(app).post('/api/accounts/signup').send(userCPayload);
         expect(signupC.status).toBe(200);

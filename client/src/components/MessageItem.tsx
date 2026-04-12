@@ -255,7 +255,7 @@ export const MessageItem = React.memo(({
 
                 {/* Reactions Display */}
                 {msg.reactions && msg.reactions.length > 0 && (
-                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', marginLeft: '56px' }}>
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', marginLeft: '56px', userSelect: 'none' }}>
                         {Object.entries(msg.reactions.reduce((acc: any, r: any) => { acc[r.emoji] = (acc[r.emoji] || 0) + 1; return acc; }, {})).map(([emoji, count]: any) => {
                             const hasReacted = msg.reactions?.some((r: any) => r.author_id === currentProfileId && r.emoji === emoji);
                             return (
@@ -286,7 +286,8 @@ export const MessageItem = React.memo(({
                     opacity: activeEmojiPickerId === msg.id ? 1 : undefined,
                     pointerEvents: activeEmojiPickerId === msg.id ? 'auto' : undefined,
                     width: '232px',
-                    height: '32px'
+                    height: '32px',
+                    userSelect: 'none'
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '0 10px' }}>
                         <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }} onClick={() => onAddReaction(msg.id, '👍')}>👍</span>

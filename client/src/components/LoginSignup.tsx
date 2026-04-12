@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { Eye, EyeOff } from 'lucide-react';
-import { getDeterministicSalt, deriveAuthKeys, generateIdentity, exportPublicKey, encryptPrivateKey, decryptPrivateKey } from '../utils/crypto';
+import { generateSalt, deriveAuthKeys, generateIdentity, exportPublicKey, encryptPrivateKey, decryptPrivateKey } from '../utils/crypto';
 import { saveSessionKey, loadSessionKey } from '../utils/keyStore';
 
 export const LoginSignup = () => {
@@ -109,7 +109,13 @@ export const LoginSignup = () => {
 
         if (mode === 'change-password') {
             try {
-                const salt = await getDeterministicSalt(currentEmail);
+                const saltRes = await fetch(`${initialServerUrl}/api/accounts/salt?email=${encodeURIComponent(currentEmail)}`);
+                if (!saltRes.ok) {
+                    const saltData = await saltRes.json();
+                    setError(saltData.error || 'Failed to retrieve account salt. Ensure this email is registered.');
+                    return;
+                }
+                const { salt } = await saltRes.json();
                 const { serverAuthKey, clientWrapKey } = await deriveAuthKeys(currentPass, salt);
                 const { publicKey, privateKey } = await generateIdentity();
                 const pubKeyStr = await exportPublicKey(publicKey);
@@ -145,7 +151,20 @@ export const LoginSignup = () => {
         const endpoint = mode === 'login' ? '/api/accounts/login' : '/api/accounts/signup';
 
         try {
-            const salt = await getDeterministicSalt(currentEmail);
+            let salt: string;
+            if (mode === 'signup') {
+                salt = await generateSalt(16);
+            } else {
+                const saltRes = await fetch(`${initialServerUrl}/api/accounts/salt?email=${encodeURIComponent(currentEmail)}`);
+                if (!saltRes.ok) {
+                    const saltData = await saltRes.json();
+                    setError(saltData.error || 'Invalid credentials');
+                    return;
+                }
+                const saltData = await saltRes.json();
+                salt = saltData.salt;
+            }
+
             const { serverAuthKey, clientWrapKey } = await deriveAuthKeys(currentPass, salt);
 
             let payload: any = { email: currentEmail, serverAuthKey };
@@ -165,6 +184,7 @@ export const LoginSignup = () => {
                 payload.encrypted_private_key = encryptedKey;
                 payload.key_salt = salt;
                 payload.key_iv = iv;
+                payload.pake_salt = salt;
 
                 tempPrivateKey = privateKey;
             } else {

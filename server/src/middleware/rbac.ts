@@ -94,6 +94,11 @@ export const requirePermission = (requiredPermission: Permission) => {
             );
 
             let userPerms = 0;
+            const everyoneRole: any = await dbManager.getServerQuery(serverId, 'SELECT permissions FROM roles WHERE name = ?', ['@everyone']);
+            if (everyoneRole) {
+                userPerms |= everyoneRole.permissions;
+            }
+
             for (const r of roles) {
                 userPerms |= r.permissions;
             }
