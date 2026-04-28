@@ -11,19 +11,19 @@ _Last updated: April 2026_
 Harmony is a communication platform built on one foundational constraint: **Harmony
 the organization never becomes a dependency for Harmony the network to function.**
 No central server. No hosted authentication. No update service you must phone home
-to. No infrastructure bill that, if unpaid, takes everyone's communities offline.
+to. No infrastructure bill that, if unpaid, takes everyone's guilds offline.
 
 This is not a technical limitation. It is a deliberate design principle that
 informs every architectural decision.
 
 The model is the old internet: **Teamspeak, Mumble, IRC, email.** Power users and
-communities spin up their own servers. Big public servers coexist with private home
-servers. The software is the platform. Hosting is the user's responsibility —
+communities spin up their own nodes. Big public nodes coexist with private home
+nodes. The software is the platform. Hosting is the user's responsibility —
 and Harmony's job is to make that as easy as possible for non-technical people.
 
 **Security is a first-class design constraint, not an afterthought.** Harmony's
 security model is built on one principle: **trust no one by default.** Not clients.
-Not servers. Not the local network. Not the federation partner. Every party in the
+Not nodes. Not the local network. Not the federation partner. Every party in the
 system is assumed to be a potential adversary until cryptographically proven otherwise.
 Security through obscurity is explicitly rejected — the entire codebase is open
 source, so every attacker has full knowledge of the protocol. Security must come
@@ -31,20 +31,24 @@ entirely from the strength of the math, not the secrecy of the implementation.
 
 ---
 
-## Who Runs a Harmony Server?
+## Who Runs a Harmony Node?
 
 There is no single user profile. The platform must serve all of these:
 
 | Operator Type | Setup | Scale | Example |
 |---|---|---|---|
-| Home power user | Self-hosted on home PC/NAS | Family, friend group | LAN server, maybe exposed externally |
+| Home power user | Self-hosted on home PC/NAS | Family, friend group | LAN node, maybe exposed externally |
 | Community host | VPS or dedicated server | Dozens to hundreds | Gaming clan, hobbyist community |
-| Public server | Properly hosted, real domain | Thousands | Like a public Mumble or TeamSpeak server |
+| Public node | Properly hosted, real domain | Thousands | Like a public Mumble or TeamSpeak server |
 | Organization | Internal deployment | Corporate/institutional | Private, air-gapped if needed |
 
-Harmony's tooling must make all four of these viable. The setup wizard, the cert
-management, the discovery system, and the network stack all have to work across
-this entire range.
+A single node can host **multiple guilds** — independent communities, each with its
+own database, channels, roles, and membership. The operator manages the node;
+guild owners manage their communities.
+
+Harmony's tooling must make all four operator types viable. The setup wizard, the
+cert management, the discovery system, and the network stack all have to work
+across this entire range.
 
 ---
 
@@ -54,12 +58,14 @@ this entire range.
 
 | Concern | Centralized (what we won't do) | Harmony approach |
 |---|---|---|
-| Server discovery | Registry Harmony hosts | mDNS on LAN, stored public URL for internet |
-| User identity | Accounts on harmony.com | Ed25519 keypair on user's own server |
-| Federation | Relay Harmony operates | Direct server-to-server over HTTPS |
+| Node discovery | Registry Harmony hosts | mDNS on LAN, stored public URL for internet |
+| User identity | Accounts on harmony.com | Ed25519 keypair on user's own node |
+| Federation | Relay Harmony operates | Direct node-to-node over HTTPS |
 | Cert management | Harmony manages it | ACME direct to Let's Encrypt, or user-provided |
 | Software updates | Harmony update server | GitHub releases / self-hosted update feed |
-| Voice routing | Harmony TURN relay | mediasoup on the user's own server |
+| Voice routing | Harmony TURN relay | mediasoup on the user's own node |
+| Guild hosting | Harmony hosts guilds | Each node operator hosts their own guilds |
+| Guild data | Harmony stores your data | Portable ZIP exports, operator-controlled storage |
 
 Every feature that could create a central dependency must be designed around that
 dependency not existing.
@@ -71,6 +77,10 @@ The desktop client is an Electron app using React + TypeScript. Electron was cho
 deliberately: it gives the client native OS access (file system, mDNS via Node.js,
 system tray, notifications) while keeping the UI in React — a language that ports
 well to mobile.
+
+The client is the interface through which users interact with guilds — browsing
+channels, sending messages, managing roles — and occasionally with the node itself
+for administrative tasks (guild management, provision codes, federation settings).
 
 **Future: React Native (Mobile — Android & iOS)**  
 The mobile client will be React Native. This is the natural extension of the Electron
@@ -88,15 +98,121 @@ domain and serve the application — a permanent central infrastructure dependen
 that violates the core philosophy. The Electron and React Native apps are the
 distribution mechanism.
 
-### Server
+### The Node
 
-The server is a single Node.js binary (`harmony-server.exe` / `harmony-server`).
-Operators download it, run it, and it manages everything: database, file storage,
-TLS, WebSocket, voice routing, federation.
+A Harmony **node** is a single Node.js process (`harmony-server.exe` / `harmony-server`).
+Operators download it, run it, and it manages everything: the guild registry, account
+database, file storage, TLS, WebSocket routing, voice (mediasoup), and federation.
 
-The server has no "call home" behavior. It does not contact Harmony's infrastructure
+The node has no "call home" behavior. It does not contact Harmony's infrastructure
 for any operational purpose. Let's Encrypt (ACME) is an exception for cert issuance
 — it is an independent non-profit infrastructure, not a Harmony dependency.
+
+A node maintains two layers of data:
+- **`node.db`** — Central database for accounts, federation state, guild registry,
+  provision codes, and node-level settings. Shared across all guilds.
+- **Per-guild databases** — Each guild has its own `guild.db` with channels, messages,
+  roles, profiles, and attachments. Fully isolated from other guilds on the same node.
+
+### Guilds — The Multi-Guild Architecture
+
+A **guild** is a self-contained community hosted on a node. It has its own database,
+file storage, channels, categories, roles, membership, and WebSocket subscription
+scope. Multiple guilds coexist independently on a single node.
+
+This is a deliberate architectural decision:
+- **Reduced operational burden:** A community host running multiple game clans or
+  topic communities doesn't need a separate node for each one.
+- **Isolation guarantees:** Guilds cannot see each other's data. WebSocket messages
+  are routed only to connections subscribed to the relevant guild. A compromised
+  guild database does not expose data from other guilds on the same node.
+- **Independent lifecycle:** Guilds can be created, stopped, started, exported,
+  imported, and deleted independently without affecting other guilds.
+
+The guild registry in `node.db` tracks:
+- Guild ID, name, description, icon
+- Owner account ID
+- Ed25519 guild identity keypair (encrypted with owner's public key)
+- Status: `active`, `stopped`, `suspended`
+- Fingerprint for identity verification
+
+**The relationship between nodes, guilds, and federation:**
+A user federates their **identity** to a node. Once authenticated on a node, they
+can join individual guilds hosted on that node. A user's guild memberships are
+scoped to guilds, but their authentication is scoped to the node.
+
+### Guild Portability & Data Sovereignty
+
+**Your guild data is yours. You can take it anywhere.**
+
+This is not just a feature — it is a design constraint derived from the core
+philosophy. If a guild's data is trapped on a single node with no export path,
+the node operator becomes a dependency. Harmony explicitly rejects this.
+
+Guild portability is implemented via:
+- **`--export-guild <id>`** — Produces a portable ZIP bundle containing the complete
+  guild database, all file attachments, and a manifest with SHA-256 integrity
+  checksums. The export is a point-in-time snapshot of the entire guild.
+- **`--import-guild <path>`** — Imports a guild bundle onto a new node. The guild
+  receives a new identity keypair, and members can reclaim their profiles through a
+  guided matching flow.
+- **Cross-node migration:** An operator can export a guild from one node, transfer
+  the ZIP, and import it on a different node. The guild's messages, files, roles,
+  and structure are fully preserved.
+
+### Provision Codes & Guild Creation Access
+
+Not everyone on a node should be able to create guilds. Provision codes are the
+mechanism for node operators to authorize guild creation:
+
+- Operators generate time-limited, member-capped provision codes via CLI or the
+  Node Admin Panel.
+- Users present a valid code when creating a guild. The code is consumed atomically.
+- Alternatively, operators can toggle **open guild creation** to allow any
+  authenticated user to create guilds freely.
+- Codes can be listed, revoked, and audited. Each code tracks who used it and
+  which guild it produced.
+
+### Federation Promotion & Resilience
+
+The Primary/Replica federation model (see Networking Model below) creates a
+single point of failure: if the primary node goes permanently offline, the user's
+authoritative identity is lost.
+
+**Promotion** solves this:
+- Any replica node can be promoted to primary status via the **Promotion Wizard**.
+- The wizard re-authenticates the user, re-issues tokens signed by the new
+  primary's Ed25519 identity key, and updates the trust chain.
+- During promotion, the system attempts a best-effort sync of the user's global
+  profile data from the old primary (when reachable).
+- **Account deactivation propagation:** When a user removes a node from their
+  trusted list, a signed deactivation notice is sent to that node, preventing it
+  from accepting requests on the user's behalf.
+
+This ensures that no single node failure can permanently lock a user out of their
+identity across the federation.
+
+### Operator Tooling
+
+Harmony provides two operator interfaces:
+
+**Server CLI** — A comprehensive command-line interface built into the node binary:
+- Guild lifecycle: `--create-guild`, `--list-guilds`, `--stop-guild`, `--start-guild`,
+  `--delete-guild` (with confirmation prompt and `--preserve-data` option)
+- Guild portability: `--export-guild` and `--import-guild` (with optional
+  `--provision-code` authorization)
+- Node dashboard: `--guild-status` displays a formatted table with guild names,
+  member counts, storage usage, and status indicators
+- Provision codes: `--generate-provision-code`, `--list-provision-codes`,
+  `--revoke-provision-code`, `--toggle-open-creation`
+- Security: `--revoke-identity` for emergency Ed25519 key revocation
+
+**Node Admin Panel** — A multi-section admin interface accessible to node operators
+from within the client application:
+- **Overview:** Node status dashboard with guild counts and provision code stats
+- **Guild Management:** Create, stop, start, and delete guilds visually
+- **Provision Codes:** Generate, list, and revoke codes with expiration controls
+- **Node Settings:** Configure node-level policies
 
 ---
 
@@ -104,30 +220,30 @@ for any operational purpose. Let's Encrypt (ACME) is an exception for cert issua
 
 ### The Identity/Transport Separation
 
-A server does not have one address. It has an **identity** (who it is, stable forever)
+A node does not have one address. It has an **identity** (who it is, stable forever)
 and one or more **transports** (how to reach it right now). These must be decoupled.
 
-**Identity:** The server's Ed25519 public key fingerprint. Generated once at setup,
+**Identity:** The node's Ed25519 public key fingerprint. Generated once at setup,
 stored in `data/server_identity.key`. Never changes. Cryptographically verifiable.
 
 **Transports:**
 - Local: `http://192.168.1.100:3001` — fast, no cert needed, LAN only
 - Public: `https://harmony.example.com` — CA-verified, works from anywhere
 
-The client identifies servers by fingerprint and tries transports in order of
+The client identifies nodes by fingerprint and tries transports in order of
 preference.
 
 ### Local Network Discovery — mDNS
 
-On boot, the server broadcasts a Multicast DNS (mDNS) service record:
+On boot, the node broadcasts a Multicast DNS (mDNS) service record:
 
 ```
 Service: _harmony._tcp.local
 TXT records:
-    server_id   = <uuid>
+    node_id     = <uuid>
     fingerprint = <ed25519 fingerprint, first 16 hex chars>
     public_url  = https://harmony.example.com  (if configured)
-    name        = "My Harmony Server"
+    name        = "My Harmony Node"
     version     = 0.5
 ```
 
@@ -141,10 +257,10 @@ mDNS support by platform:
 
 ### Adaptive Transport — Seamless LAN/Internet Switching
 
-The client maintains a transport registry per known server:
+The client maintains a transport registry per known node:
 
 ```ts
-interface ServerTransport {
+interface NodeTransport {
     fingerprint: string;    // stable identity — never changes
     localUrl:   string | null;  // 192.168.x.x — null if never seen locally
     publicUrl:  string | null;  // harmony.example.com — null if local-only
@@ -175,33 +291,33 @@ cryptographic proof says otherwise. This applies without exception to:
 
 **Clients**
 A Harmony client is open-source software. Any attacker can read the exact request
-format, replicate it, modify it, or automate it. The server must never trust
+format, replicate it, modify it, or automate it. The node must never trust
 client-reported data. Every claim a client makes — its identity, its permissions,
 its account state — must be independently verified server-side on every request.
-A client that reports being an admin, a server owner, or a trusted federation
-partner is making an unverified assertion. The server verifies via JWT signature,
+A client that reports being an admin, a guild owner, or a trusted federation
+partner is making an unverified assertion. The node verifies via JWT signature,
 database state, and cryptographic identity — never by taking the client's word.
 
-**Servers**
-A federated Harmony server is operated by an unknown third party. The server software
-is open-source, so a malicious actor can run a modified server that behaves however
+**Nodes**
+A federated Harmony node is operated by an unknown third party. The node software
+is open-source, so a malicious actor can run a modified node that behaves however
 they choose. A federation partner that claims to represent a user's account, or claims
 to be relaying a sync from a trusted primary, must prove this cryptographically via
-delegation certificates and Ed25519 signatures. An unverified server is an adversary.
+delegation certificates and Ed25519 signatures. An unverified node is an adversary.
 
 **The Network**
 Neither the local network nor the internet routing layer is trusted. Any network path
-between client and server — LAN, ISP, CDN, DNS — is treated as potentially compromised.
+between client and node — LAN, ISP, CDN, DNS — is treated as potentially compromised.
 This is why TLS is mandatory on every connection and why the Ed25519 fingerprint layer
 exists independently of the TLS certificate: even a compromised CA or a hijacked DNS
-record cannot impersonate a server to a client that has pinned its fingerprint.
+record cannot impersonate a node to a client that has pinned its fingerprint.
 
 **Kerckhoffs's Principle**
 The security of Harmony must not depend on the secrecy of its implementation.
 Because Harmony is fully open-source, every attacker knows the exact protocol,
 the exact data formats, the exact endpoint names, and the exact validation logic.
 Security must survive complete knowledge of the system. The only secrets in Harmony
-are cryptographic keys held by users and servers. Everything else is public. Any
+are cryptographic keys held by users and nodes. Everything else is public. Any
 security property that would break if an attacker read the source code is not a
 security property — it is a bug.
 
@@ -213,8 +329,8 @@ be designed with the following non-negotiable rules:
 **All inputs are untrusted until validated server-side.**
 No client-reported value is used directly for any authorization or routing decision.
 This includes: usernames, email addresses, file names, content lengths, MIME types,
-account IDs, permission flags, and server claims. Every value is validated and
-sanitized independently on the server against the database and the JWT. A client
+account IDs, permission flags, and node claims. Every value is validated and
+sanitized independently on the node against the database and the JWT. A client
 that lies about any of these must produce an error, never a privilege escalation.
 
 **Content size limits are enforced before any processing.**
@@ -224,9 +340,9 @@ library, or a WebSocket broadcast. This prevents storage bombs, memory exhaustio
 from malformed media parsing, and bandwidth amplification attacks.
 
 **Authentication is verified on every request — never cached across requests.**
-JWT tokens are verified cryptographically on every API call. The server never trusts
+JWT tokens are verified cryptographically on every API call. The node never trusts
 a session state that was validated in a previous request. Tokens must specify an
-exact issuing server (audience claim) and must use the expected algorithm (EdDSA).
+exact issuing node (audience claim) and must use the expected algorithm (EdDSA).
 Tokens claiming any other algorithm are rejected before verification, preventing
 JWT algorithm confusion attacks.
 
@@ -235,9 +351,9 @@ All file upload names are sanitized with `path.basename()` before use, and all
 resulting paths are verified to remain within the designated upload directory. No
 client-provided path component is ever used to construct a filesystem path directly.
 
-**The server never makes outbound requests to client-provided URLs**
+**The node never makes outbound requests to client-provided URLs**
 without first validating the target against a strict allowlist. Embed URL fetching,
-webhook delivery, and any other feature that involves the server fetching a
+webhook delivery, and any other feature that involves the node fetching a
 URL must maintain an explicit blocklist of private IP ranges, loopback addresses,
 and link-local addresses to prevent Server-Side Request Forgery (SSRF).
 
@@ -250,7 +366,7 @@ an attacker performing enumeration.
 **Connection-level resource limits are enforced independently of HTTP rate limiting.**
 HTTP rate limiting counts complete requests. It does not protect against:
 - Slow HTTP (Slowloris) attacks that hold connections open indefinitely
-- WebSocket connection flooding that exhausts the server's connection pool
+- WebSocket connection flooding that exhausts the node's connection pool
 - mediasoup voice session exhaustion via incomplete WebRTC handshakes
 Each of these requires its own dedicated limit, separate from request-rate limiting.
 
@@ -281,22 +397,22 @@ Harmony cleanly separates two distinct security concerns into two distinct syste
 | Concern | Mechanism | Scope |
 |---|---|---|
 | **Confidentiality** (nobody reads the wire) | TLS (self-signed or CA-signed) | Every connection, always |
-| **Identity** (this is the server I trust) | Ed25519 fingerprint (TOFU) | Every connection, always |
+| **Identity** (this is the node I trust) | Ed25519 fingerprint (TOFU) | Every connection, always |
 
-These two systems are independent. The TLS certificate is never used to verify server
+These two systems are independent. The TLS certificate is never used to verify node
 identity in Harmony's trust model. This is deliberate: the CA system was designed
-for web-scale commercial services, not for individual homelab servers. A CA cert
-provides a useful first-contact identity hint for internet-facing servers, but it
+for web-scale commercial services, not for individual homelab nodes. A CA cert
+provides a useful first-contact identity hint for internet-facing nodes, but it
 is not the authoritative identity mechanism. The Ed25519 fingerprint is.
 
 Consequences of this separation:
 - **TLS cert rotation** (e.g. Let's Encrypt renewing every 90 days) has zero impact
   on pinned fingerprints. The two systems are fully decoupled.
-- **CA compromise** (e.g. a rogue cert issued for a Harmony server's domain) cannot
-  impersonate a server to an existing client, because the fingerprint won't match.
+- **CA compromise** (e.g. a rogue cert issued for a Harmony node's domain) cannot
+  impersonate a node to an existing client, because the fingerprint won't match.
 - **Self-signed TLS on LAN** provides full wire confidentiality. An attacker can
   present their own self-signed cert — but they cannot forge the Ed25519 identity
-  verification that follows, because they don't hold the server's private key.
+  verification that follows, because they don't hold the node's private key.
 
 ### Trust Bootstrap — How Identity is Established
 
@@ -307,7 +423,7 @@ fingerprint is pinned. The CA cert becomes irrelevant to identity from that poin
 onward — it continues to provide wire encryption only.
 
 **LAN connections (self-signed TLS):**
-For Mode C servers with no CA cert, the TLS layer provides wire encryption but no
+For Mode C nodes with no CA cert, the TLS layer provides wire encryption but no
 CA-based identity signal. First-time connections on the LAN are bootstrapped via
 SPAKE2+ PIN pairing. PAKE cryptography is specifically designed to be secure against
 MITM attackers on an unauthenticated channel — meaning the SPAKE2+ handshake is
@@ -346,49 +462,49 @@ as a potential attack.
 mDNS (Multicast DNS) has no built-in authentication. Any device on a local network
 can broadcast a fake `_harmony._tcp.local` record. A malicious device (e.g., a
 Raspberry Pi on the same Wi-Fi) could advertise itself as a legitimate Harmony
-server, appearing in the client's "Discovered on your network" list.
+node, appearing in the client's "Discovered on your network" list.
 
 **Mitigation 1 — Fingerprint in mDNS TXT Record**
 
-The mDNS advertisement includes the server's Ed25519 fingerprint (first 16 hex chars).
+The mDNS advertisement includes the node's Ed25519 fingerprint (first 16 hex chars).
 When the client receives a discovery advertisement, it checks the advertised fingerprint
 against its pinned database:
-- If the fingerprint matches a known server: the client can connect seamlessly.
-- If the fingerprint is unknown (new server): the client initiates the PIN pairing flow.
-- If a server the client knows broadcasts a *changed* fingerprint: the client raises
+- If the fingerprint matches a known node: the client can connect seamlessly.
+- If the fingerprint is unknown (new node): the client initiates the PIN pairing flow.
+- If a node the client knows broadcasts a *changed* fingerprint: the client raises
   a security alert, never silently reconnects.
 
 A spoofed mDNS record will have a different fingerprint. The client will treat it
-as an unknown server and require PIN pairing. Without the real server's private key,
+as an unknown node and require PIN pairing. Without the real node's private key,
 an attacker cannot complete the SPAKE2+ handshake.
 
 **Mitigation 2 — Discovery is Never Auto-Trust**
 
 mDNS is strictly a *discovery hint*, never a grant of trust. Clients display discovered
-servers to the user, but always require explicit user action (and PIN pairing for new
-servers) before establishing any authenticated connection. Auto-connecting to an
-mDNS-discovered server is explicitly prohibited in the client implementation.
+nodes to the user, but always require explicit user action (and PIN pairing for new
+nodes) before establishing any authenticated connection. Auto-connecting to an
+mDNS-discovered node is explicitly prohibited in the client implementation.
 
 ### Key Rotation Protocol
 
-The Ed25519 server identity key (`data/server_identity.key`) is designed to be
+The Ed25519 node identity key (`data/server_identity.key`) is designed to be
 long-lived and stable. It is explicitly NOT the same as the TLS certificate. TLS
 certs (Let's Encrypt) rotate automatically every 90 days with no impact on pinned
 fingerprints — the two systems are completely decoupled.
 
 The Ed25519 key should only ever be rotated in response to a genuine compromise
-(e.g., hardware theft, server breach). When rotation is necessary:
+(e.g., hardware theft, node breach). When rotation is necessary:
 
 - The old private key signs a **Key Rotation Announcement**: a structured payload
   containing the new public key and an effective timestamp, signed by the old key.
 - Clients that have the old fingerprint pinned can verify this announcement is
-  legitimate (only the real server could have signed it with the old private key)
+  legitimate (only the real node could have signed it with the old private key)
   and update their pinned fingerprint to the new one.
 - The announcement is served at a well-known endpoint: `GET /api/federation/key-rotation`
-  and persisted in the server's data directory until manually cleared by the operator.
+  and persisted in the node's data directory until manually cleared by the operator.
 - Clients that connect after the rotation window and do not have the announcement
   cached will see a fingerprint mismatch warning and must re-verify out-of-band.
-- **A legitimate server will never silently replace a pinned fingerprint.** Any
+- **A legitimate node will never silently replace a pinned fingerprint.** Any
   automatic silent fingerprint replacement is a security bug, not a feature.
 
 ---
@@ -414,24 +530,24 @@ Prerequisites: a domain name, port 80 reachable from the internet.
 For users with Cloudflare, a hosting provider, a corporate CA, or their own PKI.
 
 - User provides `cert.pem` and `key.pem` via file upload or file path
-- Server validates: not expired, cert and key match, shows cert details
-- Server logs expiry date at every boot as a reminder
+- Node validates: not expired, cert and key match, shows cert details
+- Node logs expiry date at every boot as a reminder
 - No auto-renewal — operator is responsible
 
 ### Mode C — Local Network / Self-Signed Certificate
 
-For home LAN servers with no internet exposure and no domain name.
+For home LAN nodes with no internet exposure and no domain name.
 
 - No domain required
-- Server generates a self-signed TLS certificate on first boot
+- Node generates a self-signed TLS certificate on first boot
 - **TLS is still used** — plain HTTP is never permitted, even on LAN
-- Clients bypass CA chain validation for this server but verify identity via
+- Clients bypass CA chain validation for this node but verify identity via
   Ed25519 fingerprint pinning instead (see Security Model above)
 - First-time connections require SPAKE2+ PIN pairing to establish the fingerprint
 - mDNS discovery only — not reachable from outside the LAN by default
-- Clearly labelled in the client UI: **"Local Server"**
+- Clearly labelled in the client UI: **"Local Node"**
 - Full functionality within the LAN: voice, file sharing, federation with other
-  local servers
+  local nodes
 
 This is a legitimate, first-class deployment mode — not a degraded fallback.
 The absence of a CA cert does not mean the absence of security.
@@ -440,7 +556,7 @@ The absence of a CA cert does not mean the absence of security.
 
 ## First-Run Setup Wizard
 
-On first boot (no database detected), the server serves a browser-based setup
+On first boot (no database detected), the node serves a browser-based setup
 wizard at `http://localhost:3001/setup`. All other routes return 503 until setup
 is complete. The wizard is never accessible again after setup.
 
@@ -505,38 +621,61 @@ On click: writes config, initializes database, restarts server in production mod
 
 ### Current — Alpha (v0.5)
 
-**Status: Stabilizing core federation and basic UI workflows.**
+**Status: Core architecture stabilized. Guild system, federation, and RBAC operational.**
 
-The alpha is focused on making the federated login → profile claim → chat workflow
-reliable end-to-end. Security hardening, transport-layer identity verification, and
-operator tooling are explicitly deferred to Beta and V1.
+The alpha has expanded well beyond its original scope. In addition to the federated
+login → profile claim → chat workflow, v0.5 now includes the multi-guild architecture,
+guild-scoped RBAC, operator CLI tooling, and a comprehensive context menu engine.
 
 #### Completed
 
 - ✅ Core messaging, voice, file sharing
-- ✅ Server federation (Ed25519 PKI, delegation certificates)
-- ✅ Adaptive token verification (local + cross-server)
+- ✅ Node federation (Ed25519 PKI, delegation certificates)
+- ✅ Adaptive token verification (local + cross-node)
 - ✅ Scoped TLS agent for dev (no global NODE_TLS_REJECT_UNAUTHORIZED)
 - ✅ Self-signed cert generation (local dev only)
 - ✅ Primary/Replica identity model with delegation certificates
 - ✅ Federated login with cached credential fallback to replica
-- ✅ Join vs. Trust server separation in client UI (communication vs. identity sync)
+- ✅ Join vs. Trust node separation in client UI (communication vs. identity sync)
 - ✅ Rate-limited login with IP suspension (screaming webhooks)
 - ✅ Atomic federation invite consumption (`harmony://invite` protocol links)
-- ✅ Profile deduplication with composite key (`id:server_id`)
+- ✅ Profile deduplication with composite key (`id:node_id`)
 - ✅ Client-side message signing (Ed25519) and server-side verification
 - ✅ E2EE for direct messages
 - ✅ Daily integrity audit snapshots (`auditJob.ts`)
+- ✅ Multi-guild node architecture (`node.db` registry + per-guild `guild.db`)
+- ✅ Guild lifecycle CLI (`--create-guild`, `--list-guilds`, `--stop-guild`, `--start-guild`, `--delete-guild`)
+- ✅ Guild export/import as portable ZIP bundles with SHA-256 integrity checksums
+- ✅ Guild-scoped RBAC with 12-bit permission bitfield and layered middleware
+- ✅ Provision code system for guild creation authorization
+- ✅ Node Admin Panel UI (overview, guild management, provision codes, node settings)
+- ✅ Federation promotion (replica → primary) with Promotion Wizard UI
+- ✅ Profile sync during promotion (best-effort fetch from old primary)
+- ✅ Account deactivation propagation across federation
+- ✅ Polymorphic context menu engine (user, message, channel, category)
+- ✅ User Profile Popups with viewport-aware positioning
+- ✅ Member Sidebar with role-grouped, collapsible sections
+- ✅ Custom Markdown rendering pipeline (bold, italic, code, blockquotes, spoilers, mentions)
+- ✅ Message editing with inline edit mode and real-time broadcast
+- ✅ Message reactions with real-time sync across all clients
+- ✅ Typing indicators (guild-scoped)
+- ✅ Shift+Enter multiline message input
+- ✅ Message guardrails (content sanitization, blocked extensions, magic-byte MIME validation)
+- ✅ Per-user rate limiting with role-based tiers
+- ✅ Route decomposition (`app.ts` → 10+ dedicated route modules)
+- ✅ Guild-scoped WebSocket routing (prevents cross-guild data leakage)
+- ✅ Global + guild-scoped dual-layer profile system
+- ✅ 140+ unit tests across client and server (vitest)
 
 #### Known Alpha Workarounds (to be removed before Beta)
 
-- ⚠️  All accounts elevated to `is_admin = 1` on DB init (RBAC workaround)
-- ⚠️  All profiles elevated to `ADMIN` role on server DB init (same workaround)
-- ⚠️  `/api/accounts/sync` accepts unauthenticated requests (no server-to-server auth)
+- ~~⚠️  All accounts elevated to `is_admin = 1` on DB init~~ → ✅ **Resolved.** `is_admin` column removed; replaced by guild-scoped RBAC.
+- ~~⚠️  All profiles elevated to `ADMIN` role on server DB init~~ → ✅ **Resolved.** RBAC now uses 12-bit permission bitfield with proper role assignment.
+- ⚠️  `/api/accounts/sync` accepts unauthenticated requests (no node-to-node auth)
 - ⚠️  `account_servers` stores URLs only — no fingerprint pinning column
 - ⚠️  `authority_role` defaults to `'primary'` — multi-primary state is possible but
      undefined. See note below.
-- ⚠️  Server runs plain HTTP in dev mode; localhost production connections also currently
+- ⚠️  Node runs plain HTTP in dev mode; localhost production connections also currently
      use HTTP — self-signed TLS must be enforced for production localhost before Beta
 
 #### Not Yet Started (by design — stabilizing basics first)
@@ -544,28 +683,60 @@ operator tooling are explicitly deferred to Beta and V1.
 - ⚠️  Setup is CLI-only; cert handling is manual
 - ⚠️  No mDNS discovery
 - ⚠️  No adaptive transport (LAN vs internet switching)
-- ⚠️  No server fingerprint verification in client login or join flows
+- ⚠️  No node fingerprint verification in client login or join flows
 
-> **Note on multi-primary:** If a user signs up independently on two servers without
+> **Note on multi-primary:** If a user signs up independently on two nodes without
 > federating between them, both accounts will be `authority_role = 'primary'`. This is
 > a known ambiguous state. The intended model is that a user has exactly one primary
 > and explicitly syncs replicas via delegation. The alpha does not enforce this
 > constraint. Beta should either enforce single-primary or formally adopt multi-primary
 > with conflict resolution.
 
+### Near Term — Alpha v0.6
+
+**Focus: Operator CLI and tooling polish.**
+
+- [ ] Interactive CLI mode (`--interactive` / `--shell`): persistent REPL for bulk
+      guild operations without re-parsing args each time
+- [ ] Real-time log streaming (`--logs [--guild <id>]`): structured server log
+      output filtered by guild or severity
+- [ ] Account management CLI: `--list-accounts`, `--deactivate-account <email>`,
+      `--reset-password <email>`
+- [ ] Multi-use provision codes (`--max-uses <n>`)
+- [ ] Provision code usage analytics (full audit trail of code → guild mapping)
+
+### Near Term — Alpha v0.7
+
+**Focus: Admin visibility and monitoring.**
+
+- [ ] Audit Log Viewer in Node Admin Panel (daily integrity snapshots, login
+      attempts, federation events, permission changes)
+- [ ] Real-time admin notifications via dedicated WebSocket channel (registrations,
+      failed login spikes, guild capacity warnings)
+- [ ] Automated backup scheduling (`--backup-schedule`) with retention policies
+
+### Near Term — Alpha v0.8
+
+**Focus: Federation management and pre-Beta hardening.**
+
+- [ ] Federation Management section in Node Admin Panel (view federated nodes,
+      trust levels, last-seen timestamps, manual trust revocation)
+- [ ] Scaling optimizations for large guild databases
+- [ ] Pre-Beta security audit pass
+
 ### Near Term — Beta
 
 #### Federation Hardening
 
-- [ ] Server-to-server authentication on `/api/accounts/sync` (require delegation
-      cert or server-signed JWT — match the pattern already used by `/replica-sync`)
+- [ ] Node-to-node authentication on `/api/accounts/sync` (require delegation
+      cert or node-signed JWT — match the pattern already used by `/replica-sync`)
 - [ ] `FEDERATION_REJECT_UNAUTHORIZED=true` enforced in production mode
-- [ ] Remove universal admin elevation workaround from `database.ts`
+- ~~[ ] Remove universal admin elevation workaround from `database.ts`~~ → ✅ **Done in v0.5** (RBAC replaced `is_admin`)
 - [ ] Enforce single-primary constraint OR formally design multi-primary resolution
-- [ ] **JWT audience enforcement**: JWTs must encode the intended server fingerprint
-      as the `aud` claim. Servers must reject any token whose `aud` does not match
+- [ ] **JWT audience enforcement**: JWTs must encode the intended node fingerprint
+      as the `aud` claim. Nodes must reject any token whose `aud` does not match
       their own fingerprint, preventing JWT replay across federation partners.
-- [ ] **JWT algorithm pinning**: Server JWT verification must explicitly reject any
+- [ ] **JWT algorithm pinning**: Node JWT verification must explicitly reject any
       token that does not use EdDSA, regardless of the algorithm field in the token
       header. Accept-all-algorithms behavior enables algorithm confusion attacks.
 
@@ -574,17 +745,14 @@ operator tooling are explicitly deferred to Beta and V1.
 The following items close specific attack surfaces identified via adversarial review.
 All are pre-conditions for exposing Harmony to real users on a real network.
 
-- [ ] **Message and content size limits**: Enforce hard upper bounds server-side on:
-      message body length, channel name length, server name length, display name
-      length, and topic/description fields. Reject oversized requests before they
-      touch the database or WebSocket broadcast layer.
+- ✅ ~~**Message and content size limits**~~ — **Done in v0.5.** `MAX_MESSAGE_LENGTH`
+      enforced in `messageGuardrails.ts`.
 - [ ] **File upload path traversal fix**: Strip all path components from
       `file.originalname` using `path.basename()` before constructing the upload
       filename. Verify the final resolved path is within the configured upload
       directory using `path.resolve()` comparison.
-- [ ] **File upload size and count limits**: Enforce per-file and per-request byte
-      limits in the multer config. Enforce per-user daily upload volume limits to
-      prevent disk exhaustion via authenticated clients.
+- ✅ ~~**File upload size and count limits**~~ — **Done in v0.5.** `MAX_UPLOAD_SIZE_BYTES`
+      enforced in `messageGuardrails.ts`.
 - [ ] **Constant-time auth responses**: Auth endpoints (`/salt`, `/login`,
       `/federate`) must respond in constant time regardless of whether the account
       exists. Use a dummy scrypt computation for unknown accounts to prevent
@@ -599,15 +767,10 @@ All are pre-conditions for exposing Harmony to real users on a real network.
       are not fully established within a configurable window (default: 30s) must be
       automatically closed and their resources reclaimed. Enforce a per-user
       concurrent voice session limit to prevent resource exhaustion.
-- [ ] **Authenticated user send rate limiting**: Even authenticated users must not
-      be able to flood message send endpoints. Apply per-authenticated-user rate
-      limits on message send, reaction add, and file upload endpoints, distinct
-      from the per-IP rate limits applied to unauthenticated endpoints.
+- ✅ ~~**Authenticated user send rate limiting**~~ — **Done in v0.5.** `MessageRateLimiter`
+      with role-based tiers in `messageGuardrails.ts`.
 
 #### Rate Limiting
-
-Harmony currently rate-limits only the login endpoint. The following must be in
-place before Beta goes to real users:
 
 - [ ] **Global connection rate limiting**: Apply `express-rate-limit` middleware to
       all public-facing endpoints. Prevents resource exhaustion from floods of
@@ -617,7 +780,7 @@ place before Beta goes to real users:
       stricter per-IP limits than general API routes.
 - [ ] **PIN brute-force lockout**: The SPAKE2+ PIN pairing endpoint must enforce
       a lockout after a configurable number of failed attempts (default: 5). After
-      lockout, the server must require the owner to generate a new PIN. Per-IP
+      lockout, the node must require the owner to generate a new PIN. Per-IP
       lockout alone is insufficient on a LAN — also apply a global attempt counter
       per active PIN to handle distributed multi-device attacks.
 - [ ] **Rate limiting response headers**: Include `Retry-After` headers on 429
@@ -626,11 +789,11 @@ place before Beta goes to real users:
 #### Discovery & Transport
 
 - [ ] mDNS advertisement in `server.ts` (Node.js, `mdns-js`) — **must include
-      fingerprint and server_id in TXT record**
+      fingerprint and node_id in TXT record**
 - [ ] Client: mDNS listener + "Discovered on your network" UI
-      — discovered servers must never auto-connect; always require user action
+      — discovered nodes must never auto-connect; always require user action
       — fingerprint from TXT record checked against pinned database on display
-- [ ] Client: `ServerTransport` registry with adaptive LAN/internet switching
+- [ ] Client: `NodeTransport` registry with adaptive LAN/internet switching
 
 #### Certificate Management
 
@@ -655,22 +818,22 @@ place before Beta goes to real users:
 - [ ] TOFU fingerprint pinning stored in `account_servers` table
       (add `fingerprint TEXT` column, pin on first contact, verify on reconnect)
 - [ ] `federationFetch` verifies peer fingerprint on every request
-- [ ] Client: server fingerprint shown during join flow, SSH-style TOFU prompt
+- [ ] Client: node fingerprint shown during join flow, SSH-style TOFU prompt
 - [ ] **SPAKE2+ PIN pairing system** for first-time LAN connections:
-      — Server-side: PIN generation endpoint (owner-only, authenticated), PAKE
+      — Node-side: PIN generation endpoint (owner-only, authenticated), PAKE
         handshake endpoint, configurable expiry (max 24h), brute-force lockout
       — Client-side: detect local connection with no pinned fingerprint, prompt
         for PIN, execute SPAKE2+ handshake, pin resulting fingerprint on success
-      — Server admin UI: "Generate Local Pairing PIN" button with expiry selector
+      — Node Admin Panel: "Generate Local Pairing PIN" button with expiry selector
 - [ ] **Key rotation protocol**: `GET /api/federation/key-rotation` endpoint,
       signed rotation announcement generation CLI (`--rotate-identity-key`),
       client-side rotation announcement verification and fingerprint update flow
-- [ ] **Server-specific credential isolation**: The `serverAuthKey` sent by the client
+- [ ] **Node-specific credential isolation**: The `nodeAuthKey` sent by the client
       during login must be derived from both the user's password AND the target
-      server's fingerprint, so a credential captured by one server cannot be replayed
-      against a different server. This requires a coordinated change to the client
-      key derivation function and all server auth verification logic.
-- [ ] **SSRF protection for embed/preview URL fetching**: Before the server fetches
+      node's fingerprint, so a credential captured by one node cannot be replayed
+      against a different node. This requires a coordinated change to the client
+      key derivation function and all node auth verification logic.
+- [ ] **SSRF protection for embed/preview URL fetching**: Before the node fetches
       any client-provided URL (for link previews, webhooks, or any future feature),
       resolve the URL's IP and reject requests targeting RFC-1918 private ranges
       (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`), and link-local
@@ -679,15 +842,15 @@ place before Beta goes to real users:
       configurations to ensure `nodeIntegration: false` and `contextIsolation: true`
       in all renderer processes. Remote content must never have access to Node.js
       APIs. Validate against the official Electron security checklist.
-- [ ] **Federation metadata acknowledgment**: Document explicitly in the server
-      admin UI that joining a federation server exposes user metadata (presence,
-      timing, communication partners) to that server's operator. Users must be
-      informed before trusting a new server.
-- [ ] Cert expiry warnings in server admin UI (visible to admins only)
+- [ ] **Federation metadata acknowledgment**: Document explicitly in the Node Admin
+      Panel that joining a federation node exposes user metadata (presence,
+      timing, communication partners) to that node's operator. Users must be
+      informed before trusting a new node.
+- [ ] Cert expiry warnings in Node Admin Panel (visible to operators only)
 - [ ] `--reconfigure-cert` CLI flag to re-run cert setup without full reset
-- [ ] Audit log UI for server operators
-- [ ] Role and permission UI polished for non-technical admins
-- [ ] GitHub Releases-based update notification (no Harmony update server)
+- ✅ ~~Audit log UI for node operators~~ — Partially done (Node Admin Panel exists; audit log viewer planned for v0.7)
+- ✅ ~~Role and permission UI polished for non-technical admins~~ — **Done in v0.5.** Full role CRUD, color, position ordering, interactive context menu checklist.
+- [ ] GitHub Releases-based update notification (no Harmony update node)
 
 ### Mobile Era — Post V1
 
@@ -695,7 +858,7 @@ place before Beta goes to real users:
 - [ ] React Native client targeting Android and iOS
 - [ ] Platform bridges: Android NSD, iOS Bonjour (maps to same mDNS interface)
 - [ ] Mobile-specific UI patterns (navigation, touch targets, notifications)
-- [ ] Push notification support (local server push, no Harmony relay)
+- [ ] Push notification support (local node push, no Harmony relay)
 - [ ] Sync mDNS discovery state between Electron and React Native via shared core
 - [ ] **OS keychain integration for private key storage**: Replace IndexedDB private
       key storage with iOS Keychain, Android Keystore, and Windows DPAPI on
@@ -710,12 +873,12 @@ These are explicit non-goals, not future work:
 
 - **Host a web browser client** — requires Harmony to own a domain and run a server
   permanently. Violates the zero-infrastructure-cost principle.
-- **Run a central user registry** — user identity lives on the user's server.
-- **Operate a TURN/media relay** — voice routes through the operator's server, not ours.
+- **Run a central user registry** — user identity lives on the user's node.
+- **Operate a TURN/media relay** — voice routes through the operator's node, not ours.
 - **Require internet connectivity to function** — LAN-only deployments must work fully
   offline, forever, with no dependency on any external service.
-- **Become the gatekeeper for server discovery** — there is no "official" Harmony
-  server list. Communities find each other the way they always have: word of mouth,
+- **Become the gatekeeper for node discovery** — there is no "official" Harmony
+  node list. Communities find each other the way they always have: word of mouth,
   links, community boards.
 
 ---
@@ -723,7 +886,7 @@ These are explicit non-goals, not future work:
 ## The Long View
 
 The model this is building toward is the email model: a protocol, not a platform.
-Anyone can run a server. Servers federate with each other. No company controls the
+Anyone can run a node. Nodes federate with each other. No company controls the
 network. The software is open, forkable, and runs without the original authors
 being alive or solvent.
 
