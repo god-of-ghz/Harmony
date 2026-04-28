@@ -13,6 +13,23 @@
  *   --guild-status
  *   --export-guild <guildId> [--output <path>]
  *   --import-guild <path> [--provision-code <code>]
+ *
+ * TODO [VISION:Beta] Interactive mode (--interactive / --shell): Drop into a
+ * persistent REPL shell so the operator can run multiple commands without
+ * re-parsing args and re-initializing the DB each time. Useful for bulk
+ * operations like stopping/starting multiple guilds.
+ *
+ * TODO [VISION:Beta] --logs / --tail: Stream the server's structured log
+ * output in real-time from the CLI, filtered by guild or severity level.
+ * Currently operators must read raw stdout or redirect to a file.
+ *
+ * TODO [VISION:Beta] Account management CLI: --list-accounts, --deactivate-account,
+ * --reset-password. Currently account management requires direct DB access
+ * or the client UI.
+ *
+ * TODO [VISION:V1] --backup-schedule: Automated periodic guild exports to a
+ * configured directory with retention policies (keep last N backups, max age).
+ * Currently exports are manual one-shot operations.
  */
 
 import dbManager, { GUILDS_DIR } from '../database';

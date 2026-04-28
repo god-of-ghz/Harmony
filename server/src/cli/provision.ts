@@ -9,6 +9,19 @@
  *   --list-provision-codes
  *   --revoke-provision-code <code>
  *   --toggle-open-creation
+ *
+ * TODO [VISION:Beta] Multi-use provision codes: Currently each code is single-use.
+ * Add a --max-uses <n> flag so a single code can authorize multiple guild creations.
+ * Useful for community onboarding events.
+ *
+ * TODO [VISION:Beta] Provision code usage analytics: Track and display which codes
+ * led to guild creation, when they were used, and by whom. The --list-provision-codes
+ * output already shows basic used-by info; expand this into a full audit trail.
+ *
+ * TODO [VISION:V1] API-based provision code generation: Expose provision code
+ * CRUD via authenticated REST endpoints so the Node Admin Panel can manage codes
+ * without requiring CLI access. Currently the client UI calls these endpoints
+ * but they should be formally documented and stabilized.
  */
 
 import dbManager from '../database';

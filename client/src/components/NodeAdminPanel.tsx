@@ -5,6 +5,19 @@ import { GuildManagement } from './admin/GuildManagement';
 import { ProvisionCodes } from './admin/ProvisionCodes';
 import { NodeSettings } from './admin/NodeSettings';
 
+// TODO [VISION:Beta] Audit Log Viewer: Add an "Audit Log" section that displays
+// the daily integrity snapshots from auditJob.ts. Show login attempts, federation
+// events, guild creation/deletion, and permission changes in a searchable,
+// filterable timeline.
+
+// TODO [VISION:Beta] Real-time admin notifications: Subscribe to a dedicated
+// WebSocket channel for admin events (new account registrations, failed login
+// spikes, guild capacity warnings) so the admin panel updates live without polling.
+
+// TODO [VISION:V1] Federation Management section: View all federated nodes,
+// their trust levels, last-seen timestamps, and connection health. Allow
+// operators to manually revoke trust for specific remote servers.
+
 type AdminSection = 'overview' | 'guilds' | 'provisions' | 'settings';
 
 interface Props {

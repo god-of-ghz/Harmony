@@ -88,6 +88,24 @@ Significant improvements to day-to-day chat functionality:
 - **Typing Indicators:** Guild-scoped typing notifications that only appear to members of the same guild.
 - **Invite Links:** `harmony://invite` protocol links with scoped invite codes, expiration, and max-use limits.
 
+### 🛠️ CLI & Node Administration
+
+A full operator tooling layer for managing Harmony nodes without needing the client UI.
+
+- **Server CLI:** A comprehensive command-line interface built into the server binary for headless management:
+  - Guild lifecycle: `--create-guild`, `--list-guilds`, `--stop-guild`, `--start-guild`, `--delete-guild` (with confirmation prompt and `--preserve-data` option)
+  - Guild portability: `--export-guild` (ZIP bundles with integrity checksums) and `--import-guild` (with optional `--provision-code` authorization)
+  - Node dashboard: `--guild-status` displays a formatted table with guild names, member counts, storage usage, and active/stopped status
+  - Provision codes: `--generate-provision-code` (with `--expires` and `--max-members`), `--list-provision-codes`, `--revoke-provision-code`
+  - Access control: `--toggle-open-creation`, `--elevate <email>`
+  - Security: `--revoke-identity` for emergency Ed25519 key revocation
+- **Node Admin Panel (Client UI):** A multi-section admin interface accessible to node operators from within the client:
+  - **Overview:** Node status dashboard with guild counts, provision code stats, and quick navigation
+  - **Guild Management:** Create, stop, start, and delete guilds with a visual interface; view member counts and storage
+  - **Provision Codes:** Generate, list, and revoke provision codes with expiration and member-limit controls
+  - **Node Settings:** Configure node-level policies like open guild creation
+- **Colored TTY Output:** CLI commands produce formatted, color-coded terminal output with status icons (●/◉/○), tables with aligned columns, and human-readable byte formatting
+
 ### 🧪 Testing Infrastructure
 
 The test suite has been completely rebuilt alongside the architecture:

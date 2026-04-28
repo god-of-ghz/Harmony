@@ -20,6 +20,12 @@ import { handleGenerateProvisionCode, handleListProvisionCodes, handleRevokeProv
 // ---------------------------------------------------------------------------
 // Help Text
 // ---------------------------------------------------------------------------
+// TODO [VISION:Beta] Add the following CLI commands to the help text and dispatch:
+//   --list-accounts              List all accounts on this node
+//   --deactivate-account <email> Deactivate an account (block login)
+//   --reset-password <email>     Force-reset an account's password
+//   --interactive / --shell      Enter persistent REPL for bulk operations
+//   --logs [--guild <id>]        Stream structured server logs in real-time
 
 const HELP_TEXT = `
 Harmony Server CLI
