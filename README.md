@@ -10,119 +10,17 @@ Harmony is a privately hosted, federated chat messaging platform — an open-sou
 
 ## 🚀 What's New in v0.5 Alpha
 
-This is the largest update in Harmony's history. Nearly every subsystem has been rewritten or significantly overhauled. Here's what changed:
+This is the largest update in Harmony's history, featuring a complete architectural overhaul of almost every subsystem. Here are the key highlights:
 
-### 🔐 Backend Security Overhaul
-
-The entire backend security model has been rebuilt from scratch around a **zero-trust, guild-scoped permission system**.
-
-- **Ed25519 Server Identity (PKI):** Every Harmony server now generates a persistent Ed25519 keypair on first boot, serving as its cryptographic identity for federation. Keys are stored locally and never leave the server. A one-time revocation code is generated and displayed on first run for emergency key rotation.
-- **EdDSA JWT Authentication:** All tokens are now signed with Ed25519 (EdDSA algorithm) instead of HMAC. Cross-server token verification works by fetching the issuer's public key from `/api/federation/key`, with a stale-while-revalidate cache to avoid redundant fetches.
-- **Guild-Scoped RBAC (Role-Based Access Control):** The old flat `isCreator`/`isAdmin` permission model is gone. A new layered middleware stack enforces access at every API endpoint:
-  - `requireAuth` — JWT signature verification (local or cross-server)
-  - `requireGuildAccess` — active guild membership required (no admin bypass)
-  - `requireGuildPermission(perm)` — bitfield permission check against assigned roles
-  - `requireGuildRole(roles)` — guild-level role gating
-  - `requireGuildOwner` — owner-only operations
-  - `requireNodeOperator` — infrastructure-level access (server CLI, node admin)
-- **12-Bit Permission Bitfield:** Granular permissions including `ADMINISTRATOR`, `MANAGE_SERVER`, `MANAGE_ROLES`, `MANAGE_CHANNELS`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MANAGE_MESSAGES`, `SEND_MESSAGES`, `ATTACH_FILES`, `MENTION_EVERYONE`, `VIEW_CHANNEL`, and `READ_MESSAGE_HISTORY`.
-- **Message Guardrails:** Server-side content sanitization (null-byte stripping, script tag neutralization), blocked dangerous file extensions (.exe, .bat, .dll, .jar, etc.), magic-byte MIME validation on all uploads, and per-user rate limiting with role-based tiers.
-- **Delegation Certificates:** Cryptographically signed certificates that allow a primary server to vouch for a user's identity when they join a replica. Certificates are time-limited and verified using Ed25519 signatures.
-- **Security Webhook Alerts:** Suspicious activity (brute-force login attempts, IP suspensions) can be dispatched to external webhook endpoints for monitoring.
-
-### 🌐 Server Federation
-
-Harmony servers can now federate with each other, allowing a single user identity to span multiple independently-hosted nodes.
-
-- **Primary / Replica Identity Model:** Each user account has a single "primary" server (where they signed up) and zero or more "replica" servers. The primary holds the authoritative credential record; replicas cache it with delegation certificates.
-- **Federated Login:** When a user logs into a replica server, the replica first attempts to authenticate against the primary. If the primary is unreachable, it falls back to its local cached credentials — ensuring the user isn't locked out by a temporary outage.
-- **Cross-Node Account Sync:** Account data (credentials, profile info, trusted servers) is synchronized across federated nodes. The sync respects `updated_at` timestamps to avoid overwriting newer data with stale records.
-- **Federation Promotion:** If a user's primary server goes permanently offline, any replica can be promoted to primary status via the Promotion Wizard — re-authenticating the user and re-issuing tokens signed by the new primary's identity key. Profile data is synced from the old primary during promotion when reachable.
-- **Trust Levels:** Each server in a user's network has an explicit trust level (`trusted` / `untrusted`), controlling whether identity data is synchronized to that node.
-- **Account Deactivation:** Removing a server from your trusted list sends a signed deactivation notice, preventing the removed server from accepting requests on your behalf.
-- **SSRF-Safe Federation Fetch:** All server-to-server HTTP requests go through `federationFetch`, which uses a scoped TLS agent (no global `NODE_TLS_REJECT_UNAUTHORIZED` override) for proper certificate handling in development.
-
-### 🏛️ Guild System (In Progress)
-
-The old "server" concept has been renamed to "guilds" across the entire codebase — database schema, API routes, client state, and UI. This is a foundational change that enables multi-guild architecture on a single Harmony node.
-
-- **Multi-Guild Node Architecture:** A single Harmony server can now host multiple independent guilds, each with its own SQLite database, file storage, roles, channels, and membership. The `node.db` acts as the central registry; each guild has its own `guild.db`.
-- **Guild Lifecycle CLI:** Full command-line management for guild operations:
-  - `--create-guild`, `--list-guilds`, `--stop-guild`, `--start-guild`, `--delete-guild`
-  - `--export-guild` (portable ZIP bundles) and `--import-guild`
-  - `--guild-status` (node dashboard)
-- **Provision Codes:** Node operators can generate time-limited, member-capped invitation codes for guild creation, or toggle open guild creation for all users.
-- **Guild Setup Wizard:** Multi-step UI for creating guilds (name, icon, channels, owner assignment) with real-time validation.
-- **Guild Export / Import:** Portable ZIP bundles containing the full guild database, file attachments, and metadata. Supports cross-node migration.
-- **Ownership & Orphan Recovery:** Guilds track their owner via `owner_account_id`. Imported guilds owned by `system_import` are auto-transferred to the node operator on first privileged access.
-- **Role Management:** Full CRUD for custom roles with color, position ordering, and bitfield permissions. Includes `@everyone` default role handling and Discord permission integer sanitization for imported data.
-- **Guild-Scoped WebSocket Routing:** Real-time messages are now routed only to WebSocket connections subscribed to the relevant guild, preventing cross-guild data leakage. Subscription is verified against active membership.
-
-### 👤 Profiles & Identity
-
-- **Global + Guild Profiles:** Dual-layer identity system — users have a global profile (display name, avatar, about me) and can override it per-guild. The UI always resolves the most specific profile available.
-- **Guild Profile Claiming:** When a guild is imported from Discord, users can claim their old Discord identity through a guided profile-matching flow.
-- **Profile Avatars:** Upload-based avatar system with magic-byte validation (PNG, JPEG, GIF, WebP only), stored server-side with unique filenames.
-- **User Panel & Settings:** Comprehensive user settings UI including profile editing, password changes, server management, and account security.
-
-### 📋 Context Menus & UI Polish
-
-The entire context menu system has been rebuilt from scratch as a polymorphic, permission-aware engine.
-
-- **Unified Context Menu Engine:** A centralized `menuBuilders` system that generates context-appropriate menus for users, messages, channels, and categories. Menus are built dynamically based on the viewer's permissions, roles, and relationship to the target.
-- **User Context Menu:** Copy ID, view profile, assign/remove roles (interactive checklist with role colors), kick, ban — all permission-gated.
-- **Message Context Menu:** Reply, edit (own messages only), delete (permission-gated), copy text, copy ID, pin — with a Quick React Bar for fast emoji reactions.
-- **Channel/Category Context Menu:** Edit, delete, create channel — with permission checks.
-- **User Profile Popup:** Click any username to see their profile card with avatar, display name, roles, and about section. Viewport-aware positioning that never clips off-screen.
-- **Member Sidebar:** Grouped, collapsible member list organized by role with online/offline status and role-colored names. Right-click for the full user context menu.
-- **Viewport-Aware Positioning:** All context menus and submenus dynamically adjust their position to stay fully visible within the window bounds.
-
-### 💬 Core Messaging
-
-Significant improvements to day-to-day chat functionality:
-
-- **Markdown Rendering Pipeline:** Full custom Markdown engine supporting bold, italic, strikethrough, code blocks, inline code, blockquotes, spoilers, and links. Custom components for user mentions, role mentions, custom emoji, and internal navigation links.
-- **Shift+Enter Newlines:** Multiline message input with Shift+Enter for line breaks and Enter to send, matching Discord's behavior.
-- **Message Editing:** Inline edit mode triggered from context menu or hover actions, with full API round-trip and real-time broadcast.
-- **Message Reactions:** Add/remove emoji reactions with real-time sync across all connected clients.
-- **Typing Indicators:** Guild-scoped typing notifications that only appear to members of the same guild.
-- **Invite Links:** `harmony://invite` protocol links with scoped invite codes, expiration, and max-use limits.
-
-### 🛠️ CLI & Node Administration
-
-A full operator tooling layer for managing Harmony nodes without needing the client UI.
-
-- **Server CLI:** A comprehensive command-line interface built into the server binary for headless management:
-  - Guild lifecycle: `--create-guild`, `--list-guilds`, `--stop-guild`, `--start-guild`, `--delete-guild` (with confirmation prompt and `--preserve-data` option)
-  - Guild portability: `--export-guild` (ZIP bundles with integrity checksums) and `--import-guild` (with optional `--provision-code` authorization)
-  - Node dashboard: `--guild-status` displays a formatted table with guild names, member counts, storage usage, and active/stopped status
-  - Provision codes: `--generate-provision-code` (with `--expires` and `--max-members`), `--list-provision-codes`, `--revoke-provision-code`
-  - Access control: `--toggle-open-creation`, `--elevate <email>`
-  - Security: `--revoke-identity` for emergency Ed25519 key revocation
-- **Node Admin Panel (Client UI):** A multi-section admin interface accessible to node operators from within the client:
-  - **Overview:** Node status dashboard with guild counts, provision code stats, and quick navigation
-  - **Guild Management:** Create, stop, start, and delete guilds with a visual interface; view member counts and storage
-  - **Provision Codes:** Generate, list, and revoke provision codes with expiration and member-limit controls
-  - **Node Settings:** Configure node-level policies like open guild creation
-- **Colored TTY Output:** CLI commands produce formatted, color-coded terminal output with status icons (●/◉/○), tables with aligned columns, and human-readable byte formatting
-
-### 🧪 Testing Infrastructure
-
-The test suite has been completely rebuilt alongside the architecture:
-
-- **100+ Server Unit Tests** covering federation, RBAC, guild lifecycle, profiles, messages, categories, channels, invites, DMs, PKI, signatures, webhooks, rate limiting, and more.
-- **40+ Client Unit Tests** covering the context menu engine, identity resolution, role management, guild sidebar, member sidebar, profile popups, federation promotion, and store logic.
-- **E2E Test Framework** with Playwright for auth flows, messaging, and server management.
-- **System-Level Integration Tests** for federation lifecycle, membership transitions, and cross-node sync.
-
-### 🏗️ Architecture & Infrastructure
-
-- **Route Decomposition:** The monolithic `app.ts` has been split into dedicated route modules: `guilds.ts`, `messages.ts`, `channels.ts`, `categories.ts`, `profiles.ts`, `invites.ts`, `dms.ts`, `provision.ts`, `servers.ts`, and `health.ts`.
-- **Cryptographic Module:** Dedicated `crypto/` directory housing `pki.ts` (server identity), `jwt.ts` (EdDSA token management), `signatures.ts` (message signing), `revocation.ts` (identity revocation), and `guild_identity.ts` (guild-level crypto).
-- **CLI Module:** Server management commands extracted into `cli/guild.ts`, `cli/provision.ts`, and `cli/revoke-identity.ts`.
-- **Audit Job:** Daily integrity audit snapshots via `auditJob.ts`, tracking database consistency and configuration state.
-- **SLA Tracker:** Client-side service level monitoring for connection quality and server responsiveness.
-- **Dual-Mount Routing:** API routes accept both legacy `/api/servers/:serverId/...` and new `/api/guilds/:guildId/...` paths for backward compatibility during migration.
+- **🔐 Backend Security Overhaul:** Rebuilt from scratch using a zero-trust, guild-scoped permission model. Introduces Ed25519 (PKI) server identity, EdDSA JWT authentication, layered middleware RBAC, and granular permission bitfields.
+- **🌐 Server Federation:** Users can now federate identities across independently-hosted Harmony nodes. Supports primary/replica identity models, federated logins with offline caching, cross-node account syncing, and seamless promotion of replica nodes.
+- **🏛️ Guild System:** The core architecture now supports hosting multiple independent "guilds" (servers) per node, each with its own SQLite DB. Includes full CLI and UI lifecycles for creating, exporting, migrating, and managing guilds.
+- **👤 Profiles & Identity:** Introduces dual-layer global and per-guild profiles, upload-based avatars with magic-byte validation, and tools to claim legacy Discord profiles after imports.
+- **📋 Context Menus & UI Polish:** A polymorphic, permission-aware engine powers dynamic right-click menus across users, messages, and channels. Features a new Member Sidebar, viewport-aware dropdowns, and a modern Profile Popup.
+- **💬 Core Messaging:** Enhanced with a custom Markdown engine, multiline input (Shift+Enter), inline message editing, real-time emoji reactions, and guild-scoped typing indicators.
+- **🛠️ CLI & Node Administration:** A comprehensive headless CLI and a new in-app Node Admin Panel for operators to manage guilds, generate invite codes, and monitor instance health.
+- **🧪 Testing Infrastructure:** Completely rebuilt with over 140+ unit tests across client and server, Playwright E2E suites, and system-level integration tests.
+- **🏗️ Architecture Refactor:** The backend monolith has been split into modular, testable routes with dedicated cryptographic and CLI subsystems to improve maintainability.
 
 ---
 
@@ -251,8 +149,12 @@ cd client && npx vitest run    # Client unit tests
 |-------|--------|-------|
 | **v0.4 Alpha** | ✅ Complete | ServerSaver integration, E2EE, Discord imports, profile system |
 | **v0.5 Alpha** | 🔄 Current | Federation, guild architecture, security overhaul, context menus |
-| **Beta** | 🔜 Next | Internet-facing deployment, Let's Encrypt, setup wizard, mDNS discovery |
-| **V1** | 📋 Planned | TOFU fingerprint pinning, SPAKE2+ pairing, mobile client, full polish |
+| **v0.6 Alpha** | 🔜 Next | Interactive CLI mode, real-time log streaming, account management CLI |
+| **v0.7 Alpha** | 📋 Planned | Automated backup scheduling, Audit Log Viewer, real-time admin notifications |
+| **v0.8 Alpha** | 📋 Planned | Federation management UI, scaling optimizations, pre-beta hardening |
+| **Beta** | 📋 Planned | Internet-facing deployment, Let's Encrypt, setup wizard, mDNS discovery (Fully functional, ironing out corner cases) |
+| **V1** | 📋 Planned | TOFU fingerprint pinning, SPAKE2+ pairing, full polish |
+| **Future** | 🔮 Exploring | Mobile client |
 
 ---
 
