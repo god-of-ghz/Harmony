@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useWebRTC } from '../../hooks/useWebRTC';
 import type { QualityPreset, StreamMode } from '../../hooks/useWebRTC';
+import { useMicrophoneLevel } from '../../hooks/useMicrophoneLevel';
 import { Mic, MicOff, Video, VideoOff, MonitorUp, Settings, X } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { convertToWsUrl } from '../../utils/url';
@@ -12,7 +13,7 @@ interface Props {
 }
 
 export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
-    const { currentAccount } = useAppStore();
+    const { currentAccount, isMuted, setIsMuted, isDeafened, audioSettings } = useAppStore();
     const wsUrl = convertToWsUrl(serverUrl);
     
     // Stable peer ID to avoid WebRTC re-initialization on every render
@@ -25,7 +26,6 @@ export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
         peerId
     });
 
-    const [isMuted, setIsMuted] = useState(false);
     const [isCameraOn, setIsCameraOn] = useState(false);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     
@@ -46,6 +46,62 @@ export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
     const [screenProducerIds, setScreenProducerIds] = useState<string[]>([]);
     const [focusedId, setFocusedId] = useState<string | null>(null);
     const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
+    const [localAudioStream, setLocalAudioStream] = useState<MediaStream | null>(null);
+    
+    const [isPttPressed, setIsPttPressed] = useState(false);
+    const [isVadActive, setIsVadActive] = useState(false);
+    const vadTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+
+    const micLevelDb = useMicrophoneLevel(audioSettings.voiceActivityMode === 'manual' && audioSettings.inputMode !== 'pushToTalk' ? localAudioStream : null);
+
+    // Global Key Listener for PTT
+    useEffect(() => {
+        if (audioSettings.inputMode !== 'pushToTalk' || !audioSettings.pttKey) {
+            setIsPttPressed(false);
+            return;
+        }
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.code !== audioSettings.pttKey) return;
+            const target = e.target as HTMLElement;
+            if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+            setIsPttPressed(true);
+        };
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if (e.code !== audioSettings.pttKey) return;
+            setIsPttPressed(false);
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [audioSettings.inputMode, audioSettings.pttKey]);
+
+    // Manual VAD
+    useEffect(() => {
+        if (audioSettings.inputMode !== 'voiceActivity' || audioSettings.voiceActivityMode !== 'manual') {
+            setIsVadActive(false);
+            return;
+        }
+        const threshold = audioSettings.voiceActivityThreshold ?? -50;
+        if (micLevelDb > threshold) {
+            setIsVadActive(true);
+            if (vadTimeoutRef.current) clearTimeout(vadTimeoutRef.current);
+            vadTimeoutRef.current = setTimeout(() => {
+                setIsVadActive(false);
+            }, 500); // hold time
+        }
+    }, [micLevelDb, audioSettings.inputMode, audioSettings.voiceActivityMode, audioSettings.voiceActivityThreshold]);
+
+    const intendedTransmission = useMemo(() => {
+        if (isMuted || isDeafened) return false;
+        if (audioSettings.inputMode === 'pushToTalk') return isPttPressed;
+        if (audioSettings.inputMode === 'voiceActivity' && audioSettings.voiceActivityMode === 'manual') return isVadActive;
+        return true; 
+    }, [isMuted, isDeafened, audioSettings.inputMode, audioSettings.voiceActivityMode, isPttPressed, isVadActive]);
 
     // Auto-focus new screen shares (remote or local)
     useEffect(() => {
@@ -63,17 +119,77 @@ export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
         }
     }, [remoteStreams, focusedId, isScreenSharing]);
 
+    // Handle local transmission state
+    useEffect(() => {
+        if (cameraStreamRef.current) {
+            cameraStreamRef.current.getAudioTracks().forEach(t => {
+                t.enabled = intendedTransmission;
+            });
+        }
+    }, [intendedTransmission, isCameraOn]);
 
+
+
+    const prevAudioSettingsRef = useRef(audioSettings);
+
+    useEffect(() => {
+        if (!isCameraOn) {
+            prevAudioSettingsRef.current = audioSettings;
+            return;
+        }
+        const prev = prevAudioSettingsRef.current;
+        const current = audioSettings;
+        const changed = 
+            prev.inputDeviceId !== current.inputDeviceId ||
+            prev.videoCameraId !== current.videoCameraId ||
+            prev.noiseSuppression !== current.noiseSuppression ||
+            prev.echoCancellation !== current.echoCancellation ||
+            prev.autoGainControl !== current.autoGainControl;
+
+        if (changed) {
+            console.log("[VoiceChannel] Hardware settings changed, reloading stream...");
+            stopCamera();
+            setTimeout(() => {
+                startCamera();
+            }, 500);
+        }
+        prevAudioSettingsRef.current = audioSettings;
+    }, [
+        audioSettings.inputDeviceId,
+        audioSettings.videoCameraId,
+        audioSettings.noiseSuppression,
+        audioSettings.echoCancellation,
+        audioSettings.autoGainControl,
+        isCameraOn
+    ]);
 
     const startCamera = async () => {
         setIsCamLoading(true);
         try {
+            const videoConstraints: MediaTrackConstraints = audioSettings.videoCameraId && audioSettings.videoCameraId !== 'default'
+                ? { deviceId: { exact: audioSettings.videoCameraId }, width: 1280, height: 720, frameRate: 30 }
+                : { width: 1280, height: 720, frameRate: 30 };
+            
+            const audioConstraints: MediaTrackConstraints = audioSettings.inputDeviceId && audioSettings.inputDeviceId !== 'default'
+                ? {
+                    deviceId: { exact: audioSettings.inputDeviceId },
+                    noiseSuppression: audioSettings?.noiseSuppression ?? true, 
+                    echoCancellation: audioSettings?.echoCancellation ?? true,
+                    autoGainControl: audioSettings?.autoGainControl ?? true
+                }
+                : { 
+                    noiseSuppression: audioSettings?.noiseSuppression ?? true, 
+                    echoCancellation: audioSettings?.echoCancellation ?? true,
+                    autoGainControl: audioSettings?.autoGainControl ?? true
+                };
+
             const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: 1280, height: 720, frameRate: 30 },
-                audio: { noiseSuppression: true, echoCancellation: true }
+                video: videoConstraints,
+                audio: audioConstraints
             });
             if (localVideoRef.current) localVideoRef.current.srcObject = stream;
             cameraStreamRef.current = stream;
+            setLocalAudioStream(stream);
 
             const pIds: string[] = [];
             // Produce Audio
@@ -104,6 +220,7 @@ export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
         cameraProducerIds.forEach(id => stopProducing(id));
         cameraStreamRef.current?.getTracks().forEach(t => t.stop());
         cameraStreamRef.current = null;
+        setLocalAudioStream(null);
         if (localVideoRef.current) localVideoRef.current.srcObject = null;
         setCameraProducerIds([]);
         setIsCameraOn(false);
@@ -228,7 +345,7 @@ export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
                 {focusedId && focusedStream ? (
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         <div style={{ flex: 1, backgroundColor: '#000', borderRadius: '16px', overflow: 'hidden', position: 'relative', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
-                            <RemoteVideo stream={focusedStream.stream} isFocused />
+                            <RemoteVideo stream={focusedStream.stream} isFocused isDeafened={isDeafened} />
                             <div style={{ position: 'absolute', bottom: '16px', left: '16px', backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', padding: '6px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <MonitorUp size={14} style={{ color: '#5865f2' }} />
                                 {focusedStream.peerId.substring(0,8)}'s Screen
@@ -298,7 +415,7 @@ export const VoiceChannel = ({ channelId, serverUrl, onClose }: Props) => {
                                 transition: 'transform 0.2s'
                             }}
                             className="stream-card">
-                            <RemoteVideo stream={stream} />
+                            <RemoteVideo stream={stream} isDeafened={isDeafened} />
                             <div style={{ position: 'absolute', bottom: '12px', left: '12px', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 {type === 'screen' && <MonitorUp size={12} style={{ color: '#5865f2' }} />}
                                 {streamPeerId.substring(0,8)} {type === 'screen' ? 'Screen' : ''}
@@ -401,7 +518,8 @@ const controlBtn = {
     color: 'white'
 };
 
-const RemoteVideo = ({ stream, isFocused }: { stream: MediaStream | null, isFocused?: boolean }) => {
+const RemoteVideo = ({ stream, isFocused, isDeafened }: { stream: MediaStream | null, isFocused?: boolean, isDeafened?: boolean }) => {
+    const { audioSettings } = useAppStore();
     const ref = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         if (!ref.current || !stream) return;
@@ -409,11 +527,25 @@ const RemoteVideo = ({ stream, isFocused }: { stream: MediaStream | null, isFocu
         ref.current.play().catch(e => console.warn("video play failed:", e));
     }, [stream]);
     
+    useEffect(() => {
+        if (ref.current) {
+            ref.current.muted = !!isDeafened;
+        }
+    }, [isDeafened]);
+
+    useEffect(() => {
+        if (ref.current && typeof (ref.current as any).setSinkId === 'function') {
+            const outputId = audioSettings.outputDeviceId === 'default' || !audioSettings.outputDeviceId ? '' : audioSettings.outputDeviceId;
+            (ref.current as any).setSinkId(outputId).catch((e: any) => console.error('Failed to set sink ID:', e));
+        }
+    }, [audioSettings.outputDeviceId]);
+    
     return (
         <video 
             ref={ref} 
             autoPlay 
             playsInline 
+            muted={!!isDeafened}
             style={{ 
                 width: '100%', 
                 height: '100%', 

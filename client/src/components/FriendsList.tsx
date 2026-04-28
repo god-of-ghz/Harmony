@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore';
+import type { Relationship, GlobalProfile } from '../store/appStore';
 import { Check, X, UserPlus, UserMinus, MessageSquare } from 'lucide-react';
+import { useUserInteraction } from '../hooks/useUserInteraction';
 
 export const FriendsList = () => {
-    const { currentAccount, knownServers, relationships, setRelationships, globalProfiles } = useAppStore();
+    const { currentAccount, connectedServers, relationships, setRelationships, globalProfiles } = useAppStore();
     const [tab, setTab] = useState<'online' | 'all' | 'pending' | 'add'>('online');
     const [addInput, setAddInput] = useState('');
     const [error, setError] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
 
-    const homeServer = knownServers[0];
+    const safe = Array.isArray(connectedServers) ? connectedServers : [];
+    const homeServer = currentAccount?.primary_server_url || safe[0]?.url || '';
 
     useEffect(() => {
         if (!currentAccount || !homeServer) return;
@@ -190,23 +193,12 @@ export const FriendsList = () => {
                                 const targetId = getTargetId(r);
                                 const profile = getProfile(r);
                                 return (
-                                    <div key={i} className="friend-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', borderTop: '1px solid var(--divider)', cursor: 'pointer' }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--brand-experiment)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                {profile?.account_id.substring(0, 2).toUpperCase() || '?'}
-                                            </div>
-                                            <div>
-                                                <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                    {targetId}
-                                                </div>
-                                                {profile?.status_message && <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{profile.status_message}</div>}
-                                            </div>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                            <button style={{ padding: '8px', borderRadius: '50%', backgroundColor: 'var(--bg-tertiary)', color: 'var(--interactive-normal)', border: 'none', cursor: 'pointer' }}><MessageSquare size={16} /></button>
-                                            <button onClick={() => handleRemove(targetId)} style={{ padding: '8px', borderRadius: '50%', backgroundColor: 'var(--bg-tertiary)', color: 'var(--interactive-normal)', border: 'none', cursor: 'pointer' }}><UserMinus size={16} /></button>
-                                        </div>
-                                    </div>
+                                    <FriendRow
+                                        key={i}
+                                        targetId={targetId}
+                                        profile={profile}
+                                        onRemove={handleRemove}
+                                    />
                                 );
                             })}
                         </div>
@@ -216,3 +208,35 @@ export const FriendsList = () => {
         </div>
     );
 };
+
+// ── Extracted sub-component to allow useUserInteraction hook ──
+
+const FriendRow = ({ targetId, profile, onRemove }: { targetId: string; profile: GlobalProfile | undefined; onRemove: (id: string) => void }) => {
+    // Use a stable profileId — account_id serves as the identifier in global context
+    const userInteraction = useUserInteraction({
+        profileId: targetId,
+        accountId: targetId,
+        guildId: '', // global context — no guild-specific moderation
+    });
+
+    return (
+        <div className="friend-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', borderTop: '1px solid var(--divider)', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }} onContextMenu={userInteraction.onContextMenu} onClick={userInteraction.onClick}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--brand-experiment)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {profile?.account_id.substring(0, 2).toUpperCase() || '?'}
+                </div>
+                <div>
+                    <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {targetId}
+                    </div>
+                    {profile?.status_message && <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{profile.status_message}</div>}
+                </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+                <button style={{ padding: '8px', borderRadius: '50%', backgroundColor: 'var(--bg-tertiary)', color: 'var(--interactive-normal)', border: 'none', cursor: 'pointer' }}><MessageSquare size={16} /></button>
+                <button onClick={() => onRemove(targetId)} style={{ padding: '8px', borderRadius: '50%', backgroundColor: 'var(--bg-tertiary)', color: 'var(--interactive-normal)', border: 'none', cursor: 'pointer' }}><UserMinus size={16} /></button>
+            </div>
+        </div>
+    );
+};
+

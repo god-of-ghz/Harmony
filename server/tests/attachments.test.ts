@@ -11,12 +11,16 @@ const localMockDb = vi.hoisted(() => ({
     getQuery: vi.fn(),
     runQuery: vi.fn(),
     getAllLoadedServers: vi.fn().mockResolvedValue([{ id: 's1' }]),
+    getAllLoadedGuilds: vi.fn().mockResolvedValue([]),
     getServerQuery: vi.fn(),
+    getGuildQuery: vi.fn(),
     allNodeQuery: vi.fn(),
     allServerQuery: vi.fn().mockResolvedValue([]),
+    allGuildQuery: vi.fn().mockResolvedValue([]),
     getNodeQuery: vi.fn(),
     runNodeQuery: vi.fn(),
     runServerQuery: vi.fn(),
+    runGuildQuery: vi.fn(),
 }));
 
 vi.mock('fs', () => ({
@@ -48,10 +52,18 @@ vi.mock('../src/database', () => ({
     executeRun: vi.fn(),
     executeAll: vi.fn(),
     SERVERS_DIR: mockDir,
+    GUILDS_DIR: mockDir,
     DATA_DIR: mockDir,
     nodeDbPath: mockDir + '/node.db',
     default: localMockDb
 }));
+
+// P18 FIX: Wire guild methods as aliases of server methods
+mockDbManager.allGuildQuery = mockDbManager.allServerQuery;
+mockDbManager.getGuildQuery = mockDbManager.getServerQuery;
+mockDbManager.runGuildQuery = mockDbManager.runServerQuery;
+mockDbManager.getAllLoadedGuilds = mockDbManager.getAllLoadedServers;
+
 
 const mockBroadcast = vi.fn();
 const app = createApp(localMockDb as any, mockBroadcast);

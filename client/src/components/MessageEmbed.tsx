@@ -1,7 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../store/appStore';
-import { parseLinks } from '../utils/linkParser';
-
+import { MessageMarkdown } from './markdown/MessageMarkdown';
 export interface DiscordEmbed {
     title?: string;
     description?: string;
@@ -109,7 +108,7 @@ export const MessageEmbed: React.FC<MessageEmbedProps> = ({ embed }) => {
                         lineHeight: '1.375rem',
                         marginTop: '4px'
                     }}>
-                        {parseLinks(embed.description)}
+                        <MessageMarkdown content={embed.description} />
                     </div>
                 )}
 
@@ -133,7 +132,7 @@ export const MessageEmbed: React.FC<MessageEmbedProps> = ({ embed }) => {
                                     color: 'var(--text-normal, #dcddde)',
                                     whiteSpace: 'pre-wrap'
                                 }}>
-                                    {parseLinks(field.value)}
+                                    <MessageMarkdown content={field.value} />
                                 </div>
                             </div>
                         ))}

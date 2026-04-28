@@ -7,9 +7,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies & Build
 node_modules
 dist
 dist-ssr
+dist-electron
 *.local
 
 # Editor directories and files
@@ -28,3 +30,22 @@ dist-ssr
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Test output artifacts
+test_out.txt
+test_output*.txt
+tests_output.txt
+vitest-out.json
+test-results.xml
+
+# Coverage
+coverage/
+
+# User data (local Electron state)
+userData*
+
+# Release builds
+release/
+
+# Scratch
+test_electron.js

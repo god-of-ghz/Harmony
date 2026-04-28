@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore';
+import { ProfileSetupUI } from './ProfileSetupUI';
 
 interface UnclaimedProfile {
     id: string;
@@ -9,7 +10,7 @@ interface UnclaimedProfile {
 }
 
 export const GlobalClaimProfile = () => {
-    const { currentAccount, unclaimedProfiles, setUnclaimedProfiles, setDismissedGlobalClaim, isGuestSession, knownServers } = useAppStore();
+    const { currentAccount, unclaimedProfiles, setUnclaimedProfiles, setDismissedGlobalClaim, isGuestSession, connectedServers } = useAppStore();
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -19,42 +20,71 @@ export const GlobalClaimProfile = () => {
                 return;
             }
             try {
-                const res = await fetch('/api/accounts/unclaimed-imports', {
+                const safe = Array.isArray(connectedServers) ? connectedServers : [];
+                const homeServer = currentAccount.primary_server_url || safe[0]?.url;
+                if (!homeServer) {
+                    // Can't determine home server — dismiss silently so user isn't blocked
+                    setDismissedGlobalClaim(true);
+                    return;
+                }
+                const res = await fetch(`${homeServer}/api/accounts/unclaimed-imports`, {
                     headers: { 'Authorization': `Bearer ${currentAccount.token}` }
                 });
                 if (res.ok) {
                     const data = await res.json();
                     setUnclaimedProfiles(data);
+                    if (!data || data.length === 0) {
+                        // No unclaimed Discord imports on this server — auto-dismiss
+                        // so the user isn't blocked by a full-screen overlay after signup.
+                        // Keep loading=true so we return null until App unmounts us.
+                        setDismissedGlobalClaim(true);
+                        return;
+                    }
+                } else {
+                    // Server returned an error — don't block the user
+                    setDismissedGlobalClaim(true);
+                    return;
                 }
             } catch (err) {
                 console.error('Failed to fetch unclaimed profiles:', err);
-            } finally {
-                setLoading(false);
+                // If we can't reach the server, don't block the user with an overlay
+                setDismissedGlobalClaim(true);
+                return;
             }
+            setLoading(false);
         };
 
         fetchUnclaimed();
     }, [currentAccount?.token, isGuestSession, setUnclaimedProfiles]);
 
-    const handleDismiss = async () => {
+    const handleFreshStart = async () => {
         if (!currentAccount?.token) return;
+        // The user types their global profile name. 
+        // Currently the system relies on claiming discord identities or skipping.
+        // Let's create a global profile placeholder for them
         try {
-            const res = await fetch('/api/accounts/dismiss-claim', {
+            const safe = Array.isArray(connectedServers) ? connectedServers : [];
+            const homeServer = currentAccount.primary_server_url || safe[0]?.url;
+            if (!homeServer) { setDismissedGlobalClaim(true); return; }
+            await fetch(`${homeServer}/api/accounts/dismiss-claim`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${currentAccount.token}` }
             });
-            if (res.ok) {
-                setDismissedGlobalClaim(true);
-            }
+            // (Assuming we save their global name later. Dismiss-claim flags them as bypassing)
+            setDismissedGlobalClaim(true);
         } catch (err) {
             console.error('Failed to dismiss claim:', err);
+            setDismissedGlobalClaim(true); // Fallback
         }
     };
 
     const handleClaim = async (discord_id: string) => {
         if (!currentAccount?.token) return;
         try {
-            const res = await fetch('/api/accounts/link-discord', {
+            const safe = Array.isArray(connectedServers) ? connectedServers : [];
+            const homeServer = currentAccount.primary_server_url || safe[0]?.url;
+            if (!homeServer) return;
+            const res = await fetch(`${homeServer}/api/accounts/link-discord`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
@@ -64,98 +94,46 @@ export const GlobalClaimProfile = () => {
             });
             if (res.ok) {
                 setDismissedGlobalClaim(true);
-                // Refresh to get new profiles across all servers
-                window.location.reload();
+                
+                // Refresh per-guild claimed profiles
+                const profRes = await fetch(`${homeServer}/api/accounts/${currentAccount.id}/profiles`, {
+                    headers: { 'Authorization': `Bearer ${currentAccount.token}` }
+                });
+                if (profRes.ok) {
+                    const profiles = await profRes.json();
+                    useAppStore.getState().setClaimedProfiles(profiles);
+                }
+
+                // Refresh global profile (display_name, avatar_url from claimed Discord identity)
+                const globalRes = await fetch(`${homeServer}/api/federation/profile/${currentAccount.id}`, {
+                    headers: { 'Authorization': `Bearer ${currentAccount.token}` }
+                });
+                if (globalRes.ok) {
+                    const globalProfile = await globalRes.json();
+                    useAppStore.getState().updateGlobalProfile(globalProfile);
+                }
             }
         } catch (err) {
             console.error('Failed to link discord:', err);
         }
     };
 
-    if (loading || isGuestSession || (unclaimedProfiles || []).length === 0) return null;
+    if (loading || isGuestSession) return null;
+
+    const mappedProfiles = ((unclaimedProfiles as unknown as UnclaimedProfile[]) || []).map(u => ({
+        id: u.id,
+        name: u.global_name,
+        avatar: u.avatar
+    }));
 
     return (
-        <div id="global-claim-modal" style={{
-            position: 'fixed', inset: 0, zIndex: 3000, 
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)'
-        }}>
-            <div className="glass-panel" style={{
-                width: '600px', padding: '40px', borderRadius: '16px',
-                display: 'flex', flexDirection: 'column', gap: '24px',
-                animation: 'modalSlideUp 0.3s ease-out'
-            }}>
-                <div style={{ textAlign: 'center' }}>
-                    <h1 style={{ fontSize: '28px', marginBottom: '8px', color: 'var(--header-primary)' }}>Claim Your Profiles</h1>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '15px' }}>
-                        We found Discord profiles that might belong to you. Claiming them will restore your past server identities and shared history.
-                    </p>
-                </div>
-
-                <div 
-                    id="unclaimed-grid"
-                    style={{ 
-                    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', 
-                    gap: '16px', maxHeight: '400px', overflowY: 'auto', padding: '4px'
-                }}>
-                    {(unclaimedProfiles as unknown as UnclaimedProfile[]).map(u => (
-                        <div 
-                            key={u.id}
-                            onClick={() => handleClaim(u.id)}
-                            className="claim-card"
-                            style={{
-                                backgroundColor: 'var(--bg-secondary)', borderRadius: '12px', padding: '16px',
-                                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px',
-                                cursor: 'pointer', transition: 'all 0.2s', border: '1px solid rgba(255,255,255,0.05)',
-                                position: 'relative', overflow: 'hidden'
-                            }}
-                        >
-                            <img 
-                                src={u.avatar && typeof u.avatar === 'string' ? (u.avatar.startsWith('http') ? u.avatar : `${knownServers?.[0] || ''}${u.avatar}`) : 'https://cdn.discordapp.com/embed/avatars/0.png'} 
-                                alt={u.global_name}
-                                style={{ width: '64px', height: '64px', borderRadius: '50%', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' }}
-                            />
-                            <div style={{ textAlign: 'center' }}>
-                                <div style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--header-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100px' }}>
-                                    {u.global_name}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '8px' }}>
-                    <button 
-                        id="start-fresh-btn"
-                        onClick={handleDismiss} 
-                        style={{ 
-                            background: 'transparent', border: 'none', color: 'var(--text-muted)', 
-                            cursor: 'pointer', textDecoration: 'underline', fontSize: '13px',
-                            transition: 'color 0.2s'
-                        }}
-                    >
-                        I don't recognize these (Start Fresh)
-                    </button>
-                </div>
-            </div>
-
-            <style>{`
-                @keyframes modalSlideUp {
-                    from { transform: translateY(30px); opacity: 0; }
-                    to { transform: translateY(0); opacity: 1; }
-                }
-                .claim-card:hover {
-                    background-color: var(--bg-modifier-hover) !important;
-                    border-color: var(--brand-experiment) !important;
-                    transform: translateY(-4px);
-                    box-shadow: 0 10px 20px rgba(0,0,0,0.4);
-                }
-                .claim-card:active {
-                    transform: translateY(-1px);
-                }
-                #unclaimed-grid::-webkit-scrollbar { width: 6px; }
-                #unclaimed-grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-            `}</style>
-        </div>
+        <ProfileSetupUI 
+            title="Setup Global Profile"
+            description="Create your global Harmony identity, or optionally claim an imported Discord profile."
+            profiles={mappedProfiles}
+            serverUrl={currentAccount?.primary_server_url || (Array.isArray(connectedServers) ? connectedServers[0]?.url : '') || ''}
+            onClaim={handleClaim}
+            onFreshStart={handleFreshStart}
+        />
     );
 };

@@ -6,13 +6,19 @@ const testToken = generateToken('acc1');
 
 // Mock DB Manager
 const mockDbManager = vi.hoisted(() => ({
+    channelToServerId: { get: (id: any) => String(id).includes('Unknown') ? null : 'sv1', set:()=>{}, delete:()=>{} },
+    channelToGuildId: { get: (id: any) => String(id).includes('Unknown') ? null : 'sv1', set:()=>{}, delete:()=>{} },
     allNodeQuery: vi.fn(),
     allServerQuery: vi.fn(),
+    allGuildQuery: vi.fn().mockResolvedValue([]),
     getServerQuery: vi.fn(),
+    getGuildQuery: vi.fn(),
     getAllLoadedServers: vi.fn().mockResolvedValue([{ id: 'sv1' }]),
+    getAllLoadedGuilds: vi.fn().mockResolvedValue([]),
     nodeDbPath: 'mock_data_dir/node.db',
     DATA_DIR: 'mock_data_dir',
     SERVERS_DIR: 'mock_servers_dir',
+    GUILDS_DIR: 'mock_servers_dir',
 }));
 
 vi.mock('../src/database', () => ({
@@ -21,6 +27,13 @@ vi.mock('../src/database', () => ({
     nodeDbPath: 'mock_data_dir/node.db',
     default: mockDbManager
 }));
+
+// P18 FIX: Wire guild methods as aliases of server methods
+mockDbManager.allGuildQuery = mockDbManager.allServerQuery;
+mockDbManager.getGuildQuery = mockDbManager.getServerQuery;
+mockDbManager.getAllLoadedGuilds = mockDbManager.getAllLoadedServers;
+mockDbManager.channelToGuildId = mockDbManager.channelToServerId;
+
 
 const mockBroadcast = vi.fn();
 const app = createApp(mockDbManager, mockBroadcast);

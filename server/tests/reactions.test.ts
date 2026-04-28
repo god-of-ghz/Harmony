@@ -3,22 +3,37 @@ import request from 'supertest';
 import { createApp, generateToken } from '../src/app';
 
 // Mock DB
-const mockDbManager = vi.hoisted(() => ({
-    allNodeQuery: vi.fn(),
-    getNodeQuery: vi.fn(),
-    runNodeQuery: vi.fn(),
-    allServerQuery: vi.fn().mockResolvedValue([]),
-    getServerQuery: vi.fn(),
-    runServerQuery: vi.fn(),
-    getAllLoadedServers: vi.fn().mockResolvedValue([{ id: 'sv1' }]),
-}));
+const mockDbManager = vi.hoisted(() => {
+    const allQuery = vi.fn().mockResolvedValue([]);
+    const getQuery = vi.fn();
+    const runQuery = vi.fn();
+    const getAllLoaded = vi.fn().mockResolvedValue([{ id: 'sv1' }]);
+    const channelMap = { get: (id: any) => String(id).includes('Unknown') ? null : 'sv1', set:()=>{}, delete:()=>{} };
+    return {
+        channelToServerId: channelMap,
+        channelToGuildId: channelMap,
+        allNodeQuery: vi.fn(),
+        getNodeQuery: vi.fn(),
+        runNodeQuery: vi.fn(),
+        allServerQuery: allQuery,
+        allGuildQuery: allQuery,
+        getServerQuery: getQuery,
+        getGuildQuery: getQuery,
+        runServerQuery: runQuery,
+        runGuildQuery: runQuery,
+        getAllLoadedServers: getAllLoaded,
+        getAllLoadedGuilds: getAllLoaded,
+    };
+});
 
 vi.mock('../src/database', () => ({
     SERVERS_DIR: 'mock_servers_dir',
+    GUILDS_DIR: 'mock_servers_dir',
     DATA_DIR: 'mock_data_dir',
     nodeDbPath: 'mock_data_dir/node.db',
     default: mockDbManager
 }));
+
 vi.mock('fs', () => ({ default: { rmSync: vi.fn(), existsSync: vi.fn().mockReturnValue(true), mkdirSync: vi.fn() } }));
 
 const mockBroadcast = vi.fn();
@@ -28,7 +43,7 @@ const validToken = generateToken('acc1');
 describe('Reactions', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        mockDbManager.getServerQuery.mockImplementation(async (server, query) => {
+        mockDbManager.getServerQuery.mockImplementation(async (server: any, query: any) => {
             if (query.includes('FROM channels') && !query.includes('server_id')) return { server_id: 'sv1' };
             if (query.includes('FROM profiles')) return { id: 'p1' };
             return null;

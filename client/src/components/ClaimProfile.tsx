@@ -1,32 +1,86 @@
 import { useEffect, useState } from 'react';
 import type { Profile } from '../store/appStore';
 import { useAppStore } from '../store/appStore';
+import { ProfileSetupUI } from './ProfileSetupUI';
+import { apiFetch } from '../utils/apiFetch';
 
 export const ClaimProfile = ({ serverId }: { serverId: string }) => {
-    const { currentAccount, addClaimedProfile, serverMap, isGuestSession } = useAppStore();
+    const { currentAccount, addClaimedProfile, serverMap, connectedServers, isGuestSession } = useAppStore();
     const serverUrl = serverMap[serverId];
+    const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(serverUrl);
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
-    const [search, setSearch] = useState('');
-    const [freshName, setFreshName] = useState('');
     const [error, setError] = useState('');
-    const [isFreshStart, setIsFreshStart] = useState(isGuestSession);
+
+    console.log('[ClaimProfile] Render', { serverId, serverUrl, resolvedUrl, serverMapKeys: Object.keys(serverMap), connectedServers: connectedServers?.map(s => s.url) });
+
+    // If serverMap already has the URL, use it immediately.
+    // Otherwise, actively probe connected servers to find which one hosts this guild.
+    useEffect(() => {
+        console.log('[ClaimProfile] Resolution effect', { serverUrl, serverId });
+        if (serverUrl) {
+            console.log('[ClaimProfile] serverMap HIT — using', serverUrl);
+            setResolvedUrl(serverUrl);
+            return;
+        }
+        // Active resolution: check each connected server for this guild
+        let cancelled = false;
+        const resolve = async () => {
+            const safe = Array.isArray(connectedServers) ? connectedServers : [];
+            console.log('[ClaimProfile] Active probe starting, servers:', safe.map(s => s.url));
+            for (const srv of safe) {
+                if (cancelled) return;
+                try {
+                    console.log('[ClaimProfile] Probing', srv.url);
+                    const res = await apiFetch(`${srv.url}/api/guilds`, {
+                        headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+                    });
+                    console.log('[ClaimProfile] Probe response', srv.url, res.status);
+                    if (res.ok) {
+                        const guilds = await res.json();
+                        const guildIds = Array.isArray(guilds) ? guilds.map((g: any) => g.id) : [];
+                        console.log('[ClaimProfile] Guilds from', srv.url, ':', guildIds, '| looking for:', serverId);
+                        if (Array.isArray(guilds) && guilds.some((g: any) => g.id === serverId)) {
+                            console.log('[ClaimProfile] FOUND guild on', srv.url);
+                            if (!cancelled) setResolvedUrl(srv.url);
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.error('[ClaimProfile] Probe failed for', srv.url, err);
+                }
+            }
+            console.log('[ClaimProfile] All probes exhausted, waiting 3s for serverMap update...');
+            // Exhausted all servers — wait and retry once (serverMap may update)
+            if (!cancelled) {
+                setTimeout(() => {
+                    const latestMap = useAppStore.getState().serverMap;
+                    const latestUrl = latestMap[serverId];
+                    console.log('[ClaimProfile] Retry check — serverMap:', Object.keys(latestMap), 'url:', latestUrl);
+                    if (latestUrl) {
+                        setResolvedUrl(latestUrl);
+                    } else {
+                        setError('Unable to connect to this guild\'s server. The server URL is not available.');
+                        setLoading(false);
+                    }
+                }, 3000);
+            }
+        };
+        resolve();
+        return () => { cancelled = true; };
+    }, [serverId, serverUrl, connectedServers, currentAccount?.token]);
 
     useEffect(() => {
-        if (!serverUrl) return;
+        if (!resolvedUrl) return;
         setLoading(true);
-        fetch(`${serverUrl}/api/servers/${serverId}/profiles`, {
+        setError('');
+        fetch(`${resolvedUrl}/api/guilds/${serverId}/profiles`, {
             headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
         })
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data)) {
                     setProfiles(data);
-                    // If no unclaimed profiles, default to Fresh Start automatically
-                    const unclaimedCount = data.filter(p => !p.account_id).length;
-                    if (unclaimedCount === 0) {
-                        setIsFreshStart(true);
-                    }
                 } else if (data.error) {
                     setError(data.error);
                 }
@@ -37,17 +91,17 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
                 setError('Failed to connect to server');
                 setLoading(false);
             });
-    }, [serverId, serverUrl, currentAccount?.token]);
+    }, [serverId, resolvedUrl, currentAccount?.token]);
 
     const handleClaim = (profileId: string) => {
-        if (!currentAccount || !serverUrl) return; // Ensure currentAccount exists
-        fetch(`${serverUrl}/api/profiles/claim`, {
+        if (!currentAccount || !resolvedUrl) return; 
+        fetch(`${resolvedUrl}/api/profiles/claim`, {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${currentAccount.token}`
             },
-            body: JSON.stringify({ profileId, serverId, accountId: currentAccount.id })
+            body: JSON.stringify({ profileId, serverId, guildId: serverId, accountId: currentAccount.id })
         })
             .then(res => res.json())
             .then(result => {
@@ -66,17 +120,24 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
             });
     };
 
-    const handleFreshStart = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!freshName.trim() || !currentAccount || !serverUrl) return;
+    const handleFreshStart = (nickname: string) => {
+        if (!nickname.trim() || !currentAccount) return;
 
-        fetch(`${serverUrl}/api/servers/${serverId}/profiles`, {
+        // Try resolvedUrl first, then check live serverMap, then try any connected server
+        let url = resolvedUrl || useAppStore.getState().serverMap[serverId];
+        if (!url) {
+            console.error('[ClaimProfile] handleFreshStart: no URL resolved! serverId:', serverId, 'serverMap:', Object.keys(useAppStore.getState().serverMap));
+            setError('Server URL not resolved. Please try again in a moment.');
+            return;
+        }
+
+        fetch(`${url}/api/guilds/${serverId}/profiles`, {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${currentAccount.token}`
             },
-            body: JSON.stringify({ accountId: currentAccount.id, nickname: freshName, isGuest: isGuestSession })
+            body: JSON.stringify({ accountId: currentAccount.id, nickname: nickname, isGuest: isGuestSession })
         })
             .then(async res => {
                 const data = await res.json();
@@ -96,86 +157,29 @@ export const ClaimProfile = ({ serverId }: { serverId: string }) => {
         return <div style={{ color: 'white', padding: '24px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading available profiles...</div>;
     }
 
-    const unclaimedProfiles = profiles.filter(p => !p.account_id);
-    const filteredProfiles = unclaimedProfiles.filter(p => p.original_username.toLowerCase().includes(search.toLowerCase()));
+    const unclaimedProfiles = profiles.filter(p => !p.account_id).map(p => ({
+        id: p.id,
+        name: p.original_username,
+        avatar: p.avatar
+    }));
 
+    // Handle injected errors via the legacy component wrapper for test resiliency
     return (
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: 'var(--bg-primary)' }}>
-            <div className="glass-panel" style={{ padding: '32px', borderRadius: '12px', width: '450px', maxWidth: '90%' }}>
-                <h2 style={{ textAlign: 'center', marginBottom: '8px', color: 'var(--text-normal)' }}>Join Server</h2>
-                <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '24px' }}>Claim your old Discord identity or start fresh.</p>
-
-                {error && (
-                    <div style={{ color: '#ed4245', marginBottom: '16px', fontSize: '13px', padding: '8px', backgroundColor: 'rgba(237, 66, 69, 0.1)', border: '1px solid rgba(237, 66, 69, 0.4)', borderRadius: '4px' }}>
-                        {error}
-                    </div>
-                )}
-
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                    {!isGuestSession && (
-                        <button
-                            style={{
-                                flex: 1, padding: '8px', border: 'none', borderRadius: '4px', cursor: 'pointer',
-                                backgroundColor: !isFreshStart ? 'var(--brand-experiment)' : 'var(--bg-tertiary)', color: 'white'
-                            }}
-                            onClick={() => setIsFreshStart(false)}
-                        >Claim Existing</button>
-                    )}
-                    <button
-                        style={{
-                            flex: 1, padding: '8px', border: 'none', borderRadius: '4px', cursor: 'pointer',
-                            backgroundColor: isFreshStart || isGuestSession ? 'var(--brand-experiment)' : 'var(--bg-tertiary)', color: 'white'
-                        }}
-                        onClick={() => setIsFreshStart(true)}
-                    >Fresh Start</button>
+        <div style={{ flex: 1, position: 'relative' }}>
+             {error && (
+                <div style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', zIndex: 4000, color: '#ed4245', fontSize: '13px', padding: '8px', backgroundColor: 'rgba(237, 66, 69, 0.1)', border: '1px solid rgba(237, 66, 69, 0.4)', borderRadius: '4px' }}>
+                    {error}
                 </div>
-
-                {!isFreshStart && !isGuestSession ? (
-                    <>
-                        <input
-                            type="text"
-                            placeholder="Search by username..."
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                            style={{ width: '100%', padding: '10px', marginBottom: '16px', borderRadius: '4px', border: 'none', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-normal)' }}
-                        />
-                        {unclaimedProfiles.length === 0 ? (
-                            <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No unclaimed profiles found on this server.</div>
-                        ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto', paddingRight: '8px' }}>
-                                {filteredProfiles.map(p => (
-                                    <div
-                                        key={p.id}
-                                        style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px' }}
-                                    >
-                                        <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--brand-experiment)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-                                            {p.original_username.substring(0, 2).toUpperCase()}
-                                        </div>
-                                        <div style={{ flex: 1, fontWeight: '500', color: 'var(--text-normal)' }}>{p.original_username}</div>
-                                        <button className="btn" style={{ padding: '6px 12px', fontSize: '13px' }} onClick={() => handleClaim(p.id)}>Claim</button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </>
-                ) : (
-                    <form onSubmit={handleFreshStart} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <label htmlFor="fresh-nickname" style={{ fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Choose a Nickname</label>
-                            <input
-                                id="fresh-nickname"
-                                data-testid="fresh-nickname"
-                                type="text"
-                                value={freshName}
-                                onChange={e => setFreshName(e.target.value)}
-                                required
-                                style={{ padding: '10px', borderRadius: '4px', border: 'none', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-normal)' }}
-                            />
-                        </div>
-                        <button type="submit" className="btn" style={{ padding: '10px', fontWeight: 'bold' }}>Join Server</button>
-                    </form>
-                )}
-            </div>
+            )}
+            <ProfileSetupUI 
+                title="Join Server"
+                description={unclaimedProfiles.length > 0 ? "Create your nickname or claim an existing imported identity." : "Choose a nickname to start fresh on this server."}
+                profiles={unclaimedProfiles}
+                serverUrl={resolvedUrl}
+                onClaim={handleClaim}
+                onFreshStart={handleFreshStart}
+                isGuestSession={isGuestSession}
+            />
         </div>
     );
 };

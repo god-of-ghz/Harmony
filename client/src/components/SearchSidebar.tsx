@@ -2,19 +2,26 @@ import { useAppStore } from '../store/appStore';
 import { Search, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
+// Stable empty array to avoid infinite re-renders from Zustand selectors
+// (Object.is([], []) is false, so returning a new [] each time triggers loops)
+const EMPTY_RESULTS: any[] = [];
+
 interface SearchSidebarProps {
     onJumpToMessage: (serverId: string, channelId: string, messageId: string) => void;
 }
 
 export const SearchSidebar = ({ onJumpToMessage }: SearchSidebarProps) => {
-    const isSearchSidebarOpen = useAppStore(state => state.isSearchSidebarOpen);
+    const activeServerId = useAppStore(state => state.activeServerId);
+    
+    // Guild-scoped search state
+    const isSearchSidebarOpen = useAppStore(state => activeServerId ? (state.searchStateByGuild[activeServerId]?.isOpen ?? false) : false);
+    const searchQuery = useAppStore(state => activeServerId ? (state.searchStateByGuild[activeServerId]?.query ?? '') : '');
+    const searchResults = useAppStore(state => activeServerId ? (state.searchStateByGuild[activeServerId]?.results ?? EMPTY_RESULTS) : EMPTY_RESULTS);
+
     const setSearchSidebarOpen = useAppStore(state => state.setSearchSidebarOpen);
-    const searchQuery = useAppStore(state => state.searchQuery);
     const setSearchQuery = useAppStore(state => state.setSearchQuery);
-    const searchResults = useAppStore(state => state.searchResults);
     const setSearchResults = useAppStore(state => state.setSearchResults);
     const serverMap = useAppStore(state => state.serverMap);
-    const activeServerId = useAppStore(state => state.activeServerId);
 
     const [isSearching, setIsSearching] = useState(false);
 
@@ -22,7 +29,7 @@ export const SearchSidebar = ({ onJumpToMessage }: SearchSidebarProps) => {
         if (!searchQuery.trim() || !activeServerId || !serverMap[activeServerId]) return;
         setIsSearching(true);
         try {
-            const res = await fetch(`${serverMap[activeServerId]}/api/servers/${activeServerId}/search?query=${encodeURIComponent(searchQuery)}`, {
+            const res = await fetch(`${serverMap[activeServerId]}/api/guilds/${activeServerId}/search?query=${encodeURIComponent(searchQuery)}`, {
                 headers: { 'Authorization': `Bearer ${useAppStore.getState().currentAccount?.token}` }
             });
             const data = await res.json();

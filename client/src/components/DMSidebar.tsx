@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { MessageSquare, Plus } from 'lucide-react';
+import { UserPanel } from './UserPanel';
 
 export const DMSidebar = () => {
-    const { currentAccount, knownServers, trustedServers, activeChannelId, setActiveChannelId, presenceMap, unreadChannels } = useAppStore();
+    const { currentAccount, connectedServers, activeChannelId, setActiveChannelId, presenceMap, unreadChannels } = useAppStore();
     const [dms, setDms] = useState<any[]>([]);
     const [showNewDMModal, setShowNewDMModal] = useState(false);
     const [newDMEmail, setNewDMEmail] = useState('');
 
     const fetchDMs = async () => {
         if (!currentAccount) return;
-        const homeServer = knownServers[0] || trustedServers[0];
+        const safe = Array.isArray(connectedServers) ? connectedServers : [];
+        const homeServer = currentAccount.primary_server_url || safe[0]?.url;
         if (!homeServer) return;
 
         try {
@@ -30,7 +32,7 @@ export const DMSidebar = () => {
         fetchDMs();
         const interval = setInterval(fetchDMs, 10000);
         return () => clearInterval(interval);
-    }, [currentAccount, knownServers, trustedServers]);
+    }, [currentAccount, connectedServers]);
 
     const handleCreateDM = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -113,6 +115,8 @@ export const DMSidebar = () => {
                     );
                 })}
             </div>
+            
+            <UserPanel />
 
             {showNewDMModal && (
                 <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>

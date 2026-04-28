@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createApp } from '../app';
+import { createApp, generateToken } from '../app';
 import dbManager from '../database';
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '../config';
 
 // Mock the whole dbManager module to focus on API logic and cross-server routing
 vi.mock('../database', () => {
@@ -35,7 +33,7 @@ describe('API: Harmony Identity & Discord Claiming', () => {
         it('should link discord ID to Harmony account across multiple loaded servers', async () => {
             const accountId = 'harmony-acc-1';
             const discordId = 'discord-user-123';
-            const token = jwt.sign({ accountId }, JWT_SECRET);
+            const token = generateToken(accountId);
 
             // Mock Data setup
             (dbManager.getNodeQuery as any).mockResolvedValue({
@@ -65,10 +63,14 @@ describe('API: Harmony Identity & Discord Claiming', () => {
 
             expect(response.status).toBe(200);
 
-            // 1. Verify Node DB update (linking imported user to account)
+            // 1. Verify Node DB update (linking imported user to account and dismissing global claim)
             expect(dbManager.runNodeQuery).toHaveBeenCalledWith(
                 expect.stringContaining('UPDATE imported_discord_users SET account_id = ? WHERE id = ?'),
                 [accountId, discordId]
+            );
+            expect(dbManager.runNodeQuery).toHaveBeenCalledWith(
+                expect.stringContaining('UPDATE accounts SET dismissed_global_claim = 1 WHERE id = ?'),
+                [accountId]
             );
 
             // 2. Verify global_profiles update (mapping discord metadata to harmony global profile)
@@ -100,7 +102,7 @@ describe('API: Harmony Identity & Discord Claiming', () => {
     describe('GET /api/accounts/unclaimed-imports', () => {
         it('should return unclaimed imports if not dismissed', async () => {
             const accountId = 'acc-1';
-            const token = jwt.sign({ accountId }, JWT_SECRET);
+            const token = generateToken(accountId);
 
             (dbManager.getNodeQuery as any).mockResolvedValue({ dismissed_global_claim: 0 });
             (dbManager.allNodeQuery as any).mockResolvedValue([{ id: 'd1', global_name: 'User' }]);
@@ -115,7 +117,7 @@ describe('API: Harmony Identity & Discord Claiming', () => {
 
         it('should return empty array if claim is dismissed', async () => {
             const accountId = 'acc-1';
-            const token = jwt.sign({ accountId }, JWT_SECRET);
+            const token = generateToken(accountId);
 
             (dbManager.getNodeQuery as any).mockResolvedValue({ dismissed_global_claim: 1 });
 
@@ -132,7 +134,7 @@ describe('API: Harmony Identity & Discord Claiming', () => {
     describe('POST /api/accounts/dismiss-claim', () => {
         it('should update account table to dismiss claim', async () => {
             const accountId = 'acc-1';
-            const token = jwt.sign({ accountId }, JWT_SECRET);
+            const token = generateToken(accountId);
 
             const response = await request(app)
                 .post('/api/accounts/dismiss-claim')

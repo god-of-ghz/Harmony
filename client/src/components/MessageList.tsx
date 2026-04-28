@@ -12,6 +12,7 @@ interface MessageListProps {
     setEditValue: (val: string) => void;
     onCancelEdit: () => void;
     onEdit: (messageId: string) => void;
+    onStartEdit: (messageId: string, content: string) => void;
     onDelete: (messageId: string) => void;
     handleAddReaction: (messageId: string, emoji: string) => void;
     handleRemoveReaction: (messageId: string, emoji: string) => void;
@@ -24,6 +25,9 @@ interface MessageListProps {
     activeChannelId: string | null;
     onLoadMore: () => void;
     isLoadingMore: boolean;
+    onLoadNewer?: () => void;
+    isLoadingNewer?: boolean;
+    hasNewerMessages?: boolean;
     currentProfileId?: string;
     highlightedMessageId?: string | null;
     jumpToMessageId?: string | null;
@@ -55,6 +59,7 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
     setEditValue,
     onCancelEdit,
     onEdit,
+    onStartEdit,
     onDelete,
     handleAddReaction,
     handleRemoveReaction,
@@ -67,6 +72,9 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
     activeChannelId,
     onLoadMore,
     isLoadingMore,
+    onLoadNewer,
+    isLoadingNewer,
+    hasNewerMessages,
     currentProfileId,
     highlightedMessageId,
     jumpToMessageId,
@@ -201,6 +209,7 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
                 setEditValue={setEditValue}
                 onCancelEdit={onCancelEdit}
                 onEdit={onEdit}
+                onStartEdit={onStartEdit}
                 onDelete={onDelete}
                 onAddReaction={handleAddReaction}
                 onRemoveReaction={handleRemoveReaction}
@@ -219,7 +228,8 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         setEditValue, 
         onCancelEdit, 
         onEdit, 
-        onDelete, 
+        onStartEdit,
+        onDelete,
         handleAddReaction, 
         handleRemoveReaction, 
         handleCopyLink, 
@@ -249,17 +259,19 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
             data={listItems}
             itemContent={renderItem}
             computeItemKey={(_index, item) => item.msg.id}
-            followOutput={(isJumping || isLoadingMore) ? false : (isInitialLoading ? true : "auto")}
+            followOutput={(isJumping || isLoadingMore || hasNewerMessages) ? false : (isInitialLoading ? true : "auto")}
             alignToBottom={targetIndex === -1}
             atBottomThreshold={150}
             increaseViewportBy={500}
             startReached={onLoadMore}
+            endReached={hasNewerMessages ? onLoadNewer : undefined}
             initialTopMostItemIndex={initialIndex}
             data-testid="scroll-container"
             components={{
                 Header: () => isLoadingMore ? <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '8px' }}>Loading older messages...</div> : null,
                 Footer: () => (
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        {isLoadingNewer && <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '8px' }}>Loading newer messages...</div>}
                         {typingIndicator}
                         <div style={{ height: '24px' }} /> {/* Fixed buffer at bottom */}
                     </div>

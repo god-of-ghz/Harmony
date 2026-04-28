@@ -18,7 +18,7 @@ describe('Database Schema Updates', () => {
     it('should initialize the server database with new fields', async () => {
         // Run initialization
         await new Promise<void>((resolve) => {
-            dbManager.initServerDb(db);
+            dbManager.initGuildDb(db);
             // initServerDb uses db.serialize and db.run which are asynchronous
             // We need to wait for them to finish. 
             // Since there's no easy callback for the whole thing, we'll run a dummy query to wait.
@@ -27,7 +27,7 @@ describe('Database Schema Updates', () => {
 
         // Check servers table
         const serverCols = await new Promise<any[]>((resolve) => {
-            db.all('PRAGMA table_info(servers)', (err, rows) => resolve(rows));
+            db.all('PRAGMA table_info(guild_info)', (err, rows) => resolve(rows));
         });
         const serverColNames = serverCols.map(c => c.name);
         expect(serverColNames).toContain('owner_id');
@@ -65,7 +65,7 @@ describe('Database Schema Updates', () => {
         // Create old schema
         await new Promise<void>((resolve) => {
             db.serialize(() => {
-                db.run('CREATE TABLE servers (id TEXT PRIMARY KEY, name TEXT, icon TEXT)');
+                db.run('CREATE TABLE servers (id TEXT PRIMARY KEY, name TEXT, icon TEXT)'); // Legacy name — migration will rename
                 db.run('CREATE TABLE channels (id TEXT PRIMARY KEY, server_id TEXT, name TEXT)');
                 db.run('CREATE TABLE messages (id TEXT PRIMARY KEY, channel_id TEXT, author_id TEXT, content TEXT, timestamp TEXT)');
                 resolve();
@@ -74,13 +74,13 @@ describe('Database Schema Updates', () => {
 
         // Run initialization (should trigger ALTER TABLE)
         await new Promise<void>((resolve) => {
-            dbManager.initServerDb(db);
+            dbManager.initGuildDb(db);
             db.get('SELECT 1', () => resolve());
         });
 
         // Check new columns exist
         const serverCols = await new Promise<any[]>((resolve) => {
-            db.all('PRAGMA table_info(servers)', (err, rows) => resolve(rows));
+            db.all('PRAGMA table_info(guild_info)', (err, rows) => resolve(rows));
         });
         expect(serverCols.map(c => c.name)).toContain('owner_id');
 
@@ -97,13 +97,13 @@ describe('Database Schema Updates', () => {
 
     it('should successfully write and retrieve emoji data', async () => {
         await new Promise<void>((resolve) => {
-            dbManager.initServerDb(db);
+            dbManager.initGuildDb(db);
             db.get('SELECT 1', () => resolve());
         });
 
         // Insert a server first (for foreign key)
         await new Promise<void>((resolve, reject) => {
-            db.run('INSERT INTO servers (id, name) VALUES (?, ?)', ['srv1', 'Test Server'], (err) => {
+            db.run('INSERT INTO guild_info (id, name) VALUES (?, ?)', ['srv1', 'Test Server'], (err) => {
                 if (err) reject(err); else resolve();
             });
         });

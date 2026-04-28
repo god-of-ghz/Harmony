@@ -1,64 +1,139 @@
-# Dependencies
+# ===========================================================================
+# Dependencies & Build Artifacts
+# ===========================================================================
 node_modules/
-/dist
-/build
+dist/
+build/
+releases/
+release/
+*.tsbuildinfo
+
+# ===========================================================================
+# Environment & Secrets
+# ===========================================================================
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+*.pem
 
+# ===========================================================================
 # IDEs and Editors
+# ===========================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *.DS_Store
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Testing
-coverage/
-
-# TypeScript
-*.tsbuildinfo
-
-# OS related
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Project specific
-node_modules/
-dist/
-build/
-releases/
-backup_*/
-*.txt
-*.json
-!package.json
-!tsconfig.json
-!package-lock.json
-*.db
-server/harmony.db
-client/userData*
+# ===========================================================================
+# Logs
+# ===========================================================================
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===========================================================================
+# Databases
+# ===========================================================================
+*.db
+data/
 server/data/
-server/system_test_data/servers/
-*.pem
-client/test_electron.js
 
+# ===========================================================================
+# Test Data & Coverage
+# ===========================================================================
+coverage/
+server/coverage/
+server/coverage-system/
+client/coverage/
+client/test-results/
+client/test-results.xml
+client/playwright-report/
+server/system_test_data/
+server/test-data-a/
+server/test-data-b/
+server/.test-data/
+server/.tmp/
+server/federated_system_test_data/
+server/.rbac_test_tmp_*/
+server/mock_data/
+server/mock_servers/
+backup_*/
 
-# Agent artifacts
+# ===========================================================================
+# Discord Export Test Data (ServerSaver dumps)
+# ===========================================================================
+RPI Fools-*/
+Role Playing Adventures-*/
+
+# ===========================================================================
+# Agent & AI Artifacts
+# ===========================================================================
 .agent/
+.prompts/
 brain/
+prompts/
 *prompts.md
+*prompts_*.md
 implementation_plan_*.md
 harmony_refactor_*.md
+harmony_serversaver_prompts.md
+harmony_social_prompts_*.md
+harmony_testing_*.md
+test_audit_findings.md
+test_coverage_report.md
+test_refactor_report.md
 SERVERSAVER_EXPORT_SPEC.md
+
+# ===========================================================================
+# Scratch Scripts & One-Off Files
+# ===========================================================================
 scratch_*.js
+scratch_*.ts
 assess_coverage.js
-test_attach.txt
+refactor_preview.js
+refactor_root.js
+refactor_routes.js
+fix_dual_mount.js
+*.bat
+*.txt
+!README.txt
+
+# ===========================================================================
+# Client-Specific
+# ===========================================================================
+client/userData*
+client/dist-electron/
+client/test_electron.js
+
+# ===========================================================================
+# Server-Specific
+# ===========================================================================
+server/release/
+server/.uploads/
+server/scratch/
+
+# ===========================================================================
+# Misc Build / OS Artifacts
+# ===========================================================================
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ===========================================================================
+# JSON override: ignore all JSON except package manifests and tsconfigs
+# ===========================================================================
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.app.json
+!tsconfig.node.json
+!eslint.config.js

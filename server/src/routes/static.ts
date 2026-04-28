@@ -6,19 +6,20 @@ import { DATA_DIR } from '../database';
 const router = Router();
 
 // Base directories for static assets
-const serversBase = path.join(DATA_DIR, 'servers');
+// P18 FIX: was 'servers' — data dir is now 'guilds'
+const serversBase = path.join(DATA_DIR, 'guilds');
 const globalAvatarsBase = path.join(DATA_DIR, 'avatars');
 
 // Static serving for attachments
-router.use('/uploads/:serverId', (req, res, next) => {
-    const { serverId } = req.params;
+router.use('/uploads/:guildId', (req, res, next) => {
+    const guildId = req.params.guildId || (req.params as any).serverId;
 
-    const requestedDir = path.join(serversBase, serverId, 'uploads');
+    const requestedDir = path.join(serversBase, guildId, 'uploads');
     const resolvedDir = path.resolve(requestedDir);
 
     // Path Traversal Mitigation: Ensure the resolved path stays within the base directory
     if (!resolvedDir.startsWith(path.resolve(serversBase))) {
-        return res.status(403).json({ error: 'Access denied: Invalid path traversal attempt in serverId' });
+        return res.status(403).json({ error: 'Access denied: Invalid path traversal attempt in guildId' });
     }
 
     // Apply strict security headers to satisfy Phase 4 requirements
@@ -40,14 +41,14 @@ router.use('/avatars', (req, res, next) => {
 });
 
 // Static serving for server-specific avatars
-router.use('/servers/:serverId/avatars', (req, res, next) => {
-    const { serverId } = req.params;
+router.use('/servers/:guildId/avatars', (req, res, next) => {
+    const guildId = req.params.guildId || (req.params as any).serverId;
     
-    const requestedDir = path.join(serversBase, serverId, 'avatars');
+    const requestedDir = path.join(serversBase, guildId, 'avatars');
     const resolvedDir = path.resolve(requestedDir);
 
     if (!resolvedDir.startsWith(path.resolve(serversBase))) {
-        return res.status(403).json({ error: 'Access denied: Invalid path traversal attempt in serverId' });
+        return res.status(403).json({ error: 'Access denied: Invalid path traversal attempt in guildId' });
     }
 
     res.setHeader('Access-Control-Allow-Origin', '*');

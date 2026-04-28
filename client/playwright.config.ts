@@ -21,11 +21,12 @@ export default defineConfig({
   timeout: 30_000,
 
   use: {
-    baseURL: 'http://localhost:5174',
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     actionTimeout: 10_000,
+    ignoreHTTPSErrors: true,
   },
 
   projects: [
@@ -33,23 +34,30 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1600, height: 900 } },
     },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'], viewport: { width: 1600, height: 900 } },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'], viewport: { width: 1600, height: 900 } },
+    },
   ],
 
-  /* Optionally start both servers automatically. Uncomment to use:
   webServer: [
     {
-      command: 'npm run start -- --mock --port 3001',
+      command: 'cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 npm run start -- --mock --port 3001',
       cwd: '../server',
-      url: 'http://localhost:3001/api/health',
-      reuseExistingServer: !process.env.CI,
-      timeout: 15_000,
+      url: 'https://localhost:3001/api/health',
+      ignoreHTTPSErrors: true,
+      reuseExistingServer: false,
+      timeout: 60_000,
     },
     {
       command: 'npm run dev',
       url: 'http://localhost:5173',
       reuseExistingServer: !process.env.CI,
-      timeout: 15_000,
+      timeout: 60_000,
     },
   ],
-  */
 });

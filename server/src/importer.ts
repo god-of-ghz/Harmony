@@ -26,13 +26,13 @@ const streamPipeline = promisify(pipeline);
 // Shared locks to ensure SQLite transactions don't overlap for the same server
 const serverLocks = new Map<string, Promise<any>>();
 
-async function withServerLock(serverId: string, fn: () => Promise<any>) {
-    const lastLock = serverLocks.get(serverId) || Promise.resolve();
+async function withServerLock(guildId: string, fn: () => Promise<any>) {
+    const lastLock = serverLocks.get(guildId) || Promise.resolve();
     const nextLock = (async () => {
         try { await lastLock; } catch (e) { /* ignore previous errors */ }
         return fn();
     })();
-    serverLocks.set(serverId, nextLock);
+    serverLocks.set(guildId, nextLock);
     return nextLock;
 }
 
@@ -146,16 +146,20 @@ export interface GuildMetadata {
  * Extracts and fixes Discord IDs in a JSON string, then parses it.
  */
 export function parseGuildMetadata(json: string): GuildMetadata {
-    const fixedJson = json.replace(/"(id|owner_id|author_id|category_id|role_id)":\s*(\d+)/g, '"$1": "$2"');
+    // Phase 1: Fix keyed IDs like "id": 305208823793057803
+    let fixedJson = json.replace(/"(id|owner_id|author_id|category_id|role_id)":\s*(\d+)/g, '"$1": "$2"');
+    // Phase 2: Fix bare large integers inside arrays (e.g. "roles": [305208823793057803, ...])
+    // These exceed Number.MAX_SAFE_INTEGER and lose precision if parsed as numbers.
+    fixedJson = fixedJson.replace(/([\[,])\s*(\d{16,})\s*(?=[,\]])/g, '$1 "$2"');
     return JSON.parse(fixedJson);
 }
 
-export async function importDiscordJson(filePath: string, serverId: string, channelId: string, profileCache: Set<string> = new Set()) {
+export async function importDiscordJson(filePath: string, guildId: string, channelId: string, profileCache: Set<string> = new Set()) {
     try {
         // Channel creation is now handled in importDirectory via channel_metadata.json
 
         const mediaSourceDir = path.join(path.dirname(filePath), 'media');
-        const uploadsDestDir = path.resolve(SERVERS_DIR, serverId, 'uploads', 'channels', channelId);
+        const uploadsDestDir = path.resolve(SERVERS_DIR, guildId, 'uploads', 'channels', channelId);
 
         // Ensure destination folder exists
         try {
@@ -175,29 +179,29 @@ export async function importDiscordJson(filePath: string, serverId: string, chan
         const processBatch = async (profiles: any[][], messages: any[][], reactions: any[][]) => {
             if (profiles.length === 0 && messages.length === 0 && reactions.length === 0) return;
 
-            await dbManager.beginTransaction(serverId);
+            await dbManager.beginTransaction(guildId);
             try {
                 if (profiles.length > 0) {
-                    await dbManager.runBatch(serverId,
-                        `INSERT OR IGNORE INTO profiles (id, server_id, original_username, nickname, avatar, role, aliases) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    await dbManager.runBatch(guildId,
+                        `INSERT OR IGNORE INTO profiles (id, server_id, original_username, nickname, avatar, role, aliases, membership_status, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         profiles
                     );
                 }
                 if (messages.length > 0) {
-                    await dbManager.runBatch(serverId,
+                    await dbManager.runBatch(guildId,
                         `INSERT OR IGNORE INTO messages (id, channel_id, author_id, content, timestamp, is_pinned, attachments, embeds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                         messages
                     );
                 }
                 if (reactions.length > 0) {
-                    await dbManager.runBatch(serverId,
+                    await dbManager.runBatch(guildId,
                         `INSERT OR IGNORE INTO message_reactions (message_id, author_id, emoji) VALUES (?, ?, ?)`,
                         reactions
                     );
                 }
-                await dbManager.commit(serverId);
+                await dbManager.commit(guildId);
             } catch (err) {
-                await dbManager.rollback(serverId);
+                await dbManager.rollback(guildId);
                 throw err;
             }
         };
@@ -217,7 +221,7 @@ export async function importDiscordJson(filePath: string, serverId: string, chan
                     const msgId = msg.id.toString();
 
                     if (!profileCache.has(authorId)) {
-                        profileInserts.push([authorId, serverId, msg.author_name, msg.author_name, '', 'USER', authorId]);
+                        profileInserts.push([authorId, guildId, msg.author_name, msg.author_name, '', 'USER', authorId, 'active', Math.floor(Date.now() / 1000)]);
                         profileCache.add(authorId);
                     }
 
@@ -233,7 +237,7 @@ export async function importDiscordJson(filePath: string, serverId: string, chan
                                 const destPath = path.join(uploadsDestDir, cleanFileName);
                                 try {
                                     fileOps.copyFileSync(srcPath, destPath);
-                                    finalAttachments.push(`/uploads/${serverId}/channels/${channelId}/${cleanFileName}`);
+                                    finalAttachments.push(`/uploads/${guildId}/channels/${channelId}/${cleanFileName}`);
                                 } catch (copyErr) {
                                     console.warn(`[Importer] Failed to copy local file ${cleanFileName}:`, copyErr);
                                 }
@@ -283,7 +287,7 @@ export async function importDiscordJson(filePath: string, serverId: string, chan
                         profileInserts = [];
                         messageInserts = [];
                         reactionInserts = [];
-                        await withServerLock(serverId, () => processBatch(p, m, r));
+                        await withServerLock(guildId, () => processBatch(p, m, r));
                     }
                     callback();
 
@@ -294,7 +298,7 @@ export async function importDiscordJson(filePath: string, serverId: string, chan
             },
             async flush(callback) {
                 try {
-                    await withServerLock(serverId, () => processBatch(profileInserts, messageInserts, reactionInserts));
+                    await withServerLock(guildId, () => processBatch(profileInserts, messageInserts, reactionInserts));
                     callback();
                 } catch (err) {
                     callback(err as Error);
@@ -336,9 +340,9 @@ export async function importDirectory(dirPath: string, serverName: string) {
             const jsonFiles = files.filter(f => f.endsWith('.json'));
             if (jsonFiles.length === 0) return;
 
-            const serverId = 'server-' + Date.now().toString();
-            await dbManager.initializeServerBundle(serverId, serverName, '');
-            console.log(`Fallback: Created legacy server bundle "${serverName}" (${serverId}). Importing ${jsonFiles.length} channels...`);
+            const guildId = 'server-' + Date.now().toString();
+            await dbManager.initializeServerBundle(guildId, serverName, '');
+            console.log(`Fallback: Created legacy server bundle "${serverName}" (${guildId}). Importing ${jsonFiles.length} channels...`);
 
             const profileCache: Set<string> = new Set();
             const CONCURRENCY_LIMIT = 4;
@@ -346,7 +350,7 @@ export async function importDirectory(dirPath: string, serverName: string) {
 
             for (const file of jsonFiles) {
                 const fullPath = path.join(dirPath, file);
-                const promise = importDiscordJson(fullPath, serverId, 'legacy-id', profileCache).finally(() => {
+                const promise = importDiscordJson(fullPath, guildId, 'legacy-id', profileCache).finally(() => {
                     activePromises.delete(promise);
                 });
                 activePromises.add(promise);
@@ -359,17 +363,23 @@ export async function importDirectory(dirPath: string, serverName: string) {
         const metadataRaw = fs.readFileSync(metadataPath, 'utf8');
         const metadata = parseGuildMetadata(metadataRaw);
 
-        const serverId = metadata.id.toString();
+        const guildId = metadata.id.toString();
         const name = metadata.name || serverName;
 
-        console.log(`Ingesting guild metadata for "${name}" (${serverId})...`);
+        console.log(`Ingesting guild metadata for "${name}" (${guildId})...`);
 
-        await dbManager.initializeServerBundle(serverId, name, metadata.icon_url || '', metadata.owner_id.toString(), metadata.description || '');
+        // Create a system account to satisfy foreign key constraints for the guild registry
+        await dbManager.runNodeQuery(
+            `INSERT OR IGNORE INTO accounts (id, email, auth_verifier, public_key, encrypted_private_key, key_salt, key_iv) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ['system_import', 'import@harmony.local', 'none', 'none', 'none', 'none', 'none']
+        );
+
+        await dbManager.initializeServerBundle(guildId, name, metadata.icon_url || '', 'system_import', metadata.description || '');
 
         // 1. Roles
         if (metadata.roles && metadata.roles.length > 0) {
-            const roleParams = metadata.roles.map(r => [r.id.toString(), serverId, r.name, r.color, r.permissions, r.position]);
-            await dbManager.runBatch(serverId, `INSERT OR IGNORE INTO roles (id, server_id, name, color, permissions, position) VALUES (?, ?, ?, ?, ?, ?)`, roleParams);
+            const roleParams = metadata.roles.map(r => [r.id.toString(), guildId, r.name, r.color, r.permissions, r.position]);
+            await dbManager.runBatch(guildId, `INSERT OR IGNORE INTO roles (id, server_id, name, color, permissions, position) VALUES (?, ?, ?, ?, ?, ?)`, roleParams);
         }
 
         // 2. Members (Global Discord Users & Server Profiles)
@@ -395,33 +405,34 @@ export async function importDirectory(dirPath: string, serverName: string) {
                 // B. Server DB: profiles
                 let serverAvatarPath: string | null = null;
                 if (m.server_avatar_url) {
-                    serverAvatarPath = await downloadAvatar(m.server_avatar_url, 'server', id, serverId);
+                    serverAvatarPath = await downloadAvatar(m.server_avatar_url, 'server', id, guildId);
                 } else if (globalAvatarPath) {
                     // Fallback Rule: Copy global avatar to server avatar directory
                     const ext = path.extname(globalAvatarPath);
                     // Remove leading slash for path.join to ensure it's treated as relative
                     const cleanGlobalPath = globalAvatarPath.startsWith('/') ? globalAvatarPath.slice(1) : globalAvatarPath;
                     const globalFile = path.join(DATA_DIR, cleanGlobalPath);
-                    const serverAvatarsDir = path.join(DATA_DIR, 'servers', serverId, 'avatars');
+                    // P18 FIX: was 'servers' — data dir is now 'guilds'
+                    const serverAvatarsDir = path.join(DATA_DIR, 'guilds', guildId, 'avatars');
                     if (!fileOps.existsSync(serverAvatarsDir)) fileOps.mkdirSync(serverAvatarsDir);
                     
                     const serverFile = path.join(serverAvatarsDir, `${id}${ext}`);
                     try {
                         if (fileOps.existsSync(globalFile)) {
                             fileOps.copyFileSync(globalFile, serverFile);
-                            serverAvatarPath = `/servers/${serverId}/avatars/${id}${ext}`;
+                            serverAvatarPath = `/servers/${guildId}/avatars/${id}${ext}`;
                         }
                     } catch (err) {
                         console.error(`[Importer] Failed to fallback copy avatar for ${id}:`, err);
                     }
                 }
 
-                profileBatch.push([id, serverId, m.name, nickname, serverAvatarPath, 'USER', id]);
+                profileBatch.push([id, guildId, m.name, nickname, serverAvatarPath, 'USER', id, 'active', Math.floor(Date.now() / 1000)]);
                 profileCache.add(id);
             }
 
             if (profileBatch.length > 0) {
-                await dbManager.runBatch(serverId, `INSERT OR REPLACE INTO profiles (id, server_id, original_username, nickname, avatar, role, aliases) VALUES (?, ?, ?, ?, ?, ?, ?)`, profileBatch);
+                await dbManager.runBatch(guildId, `INSERT OR REPLACE INTO profiles (id, server_id, original_username, nickname, avatar, role, aliases, membership_status, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, profileBatch);
             }
 
             // 3. Profile Roles
@@ -431,7 +442,7 @@ export async function importDirectory(dirPath: string, serverName: string) {
                 if (m.roles) {
                     m.roles.forEach(roleId => {
                         if (validRoleIds.has(roleId.toString())) {
-                            profileRoleParams.push([m.id.toString(), serverId, roleId.toString()]);
+                            profileRoleParams.push([m.id.toString(), guildId, roleId.toString()]);
                         } else {
                             console.warn(`[Importer] Skipping unknown role ${roleId} for member ${m.id}`);
                         }
@@ -439,20 +450,20 @@ export async function importDirectory(dirPath: string, serverName: string) {
                 }
             });
             if (profileRoleParams.length > 0) {
-                await dbManager.runBatch(serverId, `INSERT OR IGNORE INTO profile_roles (profile_id, server_id, role_id) VALUES (?, ?, ?)`, profileRoleParams);
+                await dbManager.runBatch(guildId, `INSERT OR IGNORE INTO profile_roles (profile_id, server_id, role_id) VALUES (?, ?, ?)`, profileRoleParams);
             }
         }
 
         // 4. Emojis
         if (metadata.emojis && metadata.emojis.length > 0) {
-            const emojiParams = metadata.emojis.map(e => [e.id.toString(), serverId, e.name, e.url, e.animated ? 1 : 0]);
-            await dbManager.runBatch(serverId, `INSERT OR IGNORE INTO server_emojis (id, server_id, name, url, animated) VALUES (?, ?, ?, ?, ?)`, emojiParams);
+            const emojiParams = metadata.emojis.map(e => [e.id.toString(), guildId, e.name, e.url, e.animated ? 1 : 0]);
+            await dbManager.runBatch(guildId, `INSERT OR IGNORE INTO server_emojis (id, server_id, name, url, animated) VALUES (?, ?, ?, ?, ?)`, emojiParams);
         }
 
         // 5. Categories
         if (metadata.categories && metadata.categories.length > 0) {
-            const categoryParams = metadata.categories.map(c => [c.id.toString(), serverId, c.name, c.position]);
-            await dbManager.runBatch(serverId, `INSERT OR IGNORE INTO channel_categories (id, server_id, name, position) VALUES (?, ?, ?, ?)`, categoryParams);
+            const categoryParams = metadata.categories.map(c => [c.id.toString(), guildId, c.name, c.position]);
+            await dbManager.runBatch(guildId, `INSERT OR IGNORE INTO channel_categories (id, server_id, name, position) VALUES (?, ?, ?, ?)`, categoryParams);
         }
 
         // Channel discovery
@@ -481,11 +492,11 @@ export async function importDirectory(dirPath: string, serverName: string) {
                         categoryId = null;
                     }
 
-                    await dbManager.runServerQuery(serverId,
+                    await dbManager.runGuildQuery(guildId,
                         `INSERT OR IGNORE INTO channels (id, server_id, category_id, name, topic, nsfw, position) VALUES (?, ?, ?, ?, ?, ?, ?)`,
                         [
                             channelId,
-                            serverId,
+                            guildId,
                             categoryId,
                             channelMetadata.name,
                             channelMetadata.topic || null,
@@ -494,7 +505,7 @@ export async function importDirectory(dirPath: string, serverName: string) {
                         ]
                     );
 
-                    await importDiscordJson(messagesPath, serverId, channelId, profileCache);
+                    await importDiscordJson(messagesPath, guildId, channelId, profileCache);
                 } catch (err) {
                     console.error(`Failed to import channel ${entry.name}:`, err);
                 }

@@ -37,6 +37,7 @@ export const MessageInput = React.memo(({
 }: MessageInputProps) => {
     const [inputValue, setInputValue] = useState('');
     const [pendingAttachments, setPendingAttachments] = useState<string[]>([]);
+    const [sendError, setSendError] = useState<string | null>(null);
     const [showAutocomplete, setShowAutocomplete] = useState(false);
     const [autocompleteFilter, setAutocompleteFilter] = useState('');
     const [autocompleteIndex, setAutocompleteIndex] = useState(0);
@@ -51,13 +52,49 @@ export const MessageInput = React.memo(({
     const serverProfiles = useAppStore(state => state.serverProfiles);
     const serverRoles = useAppStore(state => state.serverRoles);
 
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         if (replyingTo || activeChannelId) {
             inputRef.current?.focus();
         }
     }, [replyingTo, activeChannelId]);
+
+    // Listen for mention insertion from context menu
+    useEffect(() => {
+        const handleInsertMention = (e: Event) => {
+            const customEvent = e as CustomEvent;
+            const { nickname } = customEvent.detail;
+            if (!nickname) return;
+            const mention = `@${nickname} `;
+            setInputValue((prev) => {
+                // Insert at cursor position if possible
+                const el = inputRef.current;
+                if (el && el.selectionStart !== null) {
+                    const start = el.selectionStart;
+                    const before = prev.substring(0, start);
+                    const after = prev.substring(start);
+                    // Schedule cursor repositioning after React re-render
+                    setTimeout(() => {
+                        el.selectionStart = el.selectionEnd = start + mention.length;
+                        el.focus();
+                    }, 0);
+                    return `${before}${mention}${after}`;
+                }
+                return prev + mention;
+            });
+        };
+        window.addEventListener('harmony-insert-mention', handleInsertMention);
+        return () => window.removeEventListener('harmony-insert-mention', handleInsertMention);
+    }, []);
+
+    // Auto-dismiss send errors after 5 seconds
+    useEffect(() => {
+        if (sendError) {
+            const timer = setTimeout(() => setSendError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [sendError]);
 
     const handleSend = async () => {
         if ((!inputValue.trim() && pendingAttachments.length === 0) || !currentProfile || !activeChannelId) return;
@@ -157,11 +194,27 @@ export const MessageInput = React.memo(({
                 reply_to: replyingTo?.id || null,
                 is_encrypted: isEncrypted
             })
-        }).catch(console.error);
+        }).then(async res => {
+            if (res.status === 429) {
+                setSendError("You are sending messages too fast. Please slow down.");
+                return;
+            } else if (!res.ok) {
+                const err = await res.json();
+                setSendError(err.error || "Failed to send message");
+                return;
+            }
+        }).catch(err => {
+            console.error(err);
+            setSendError("Network error: Could not send message.");
+        });
 
         setInputValue('');
         setPendingAttachments([]);
         setReplyingTo(null);
+        // Reset textarea height after clearing
+        if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+        }
         onMessageSent?.();
     };
 
@@ -184,7 +237,7 @@ export const MessageInput = React.memo(({
 
     const lastTypingEventRef = useRef<number>(0);
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (showAutocomplete) {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -229,7 +282,10 @@ export const MessageInput = React.memo(({
             }
         }
 
-        if (e.key === 'Enter') handleSend();
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+        }
         else {
             if (activeChannelId && wsRef.current?.readyState === WebSocket.OPEN) {
                 const accountId = currentAccount?.id;
@@ -255,11 +311,18 @@ export const MessageInput = React.memo(({
         }
 
         if (files.length > 0) {
+            // Client-side extension check
+            const blocked = ['.exe', '.bat', '.cmd', '.msi', '.scr', '.com', '.pif', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.ps1', '.dll', '.sys', '.cpl', '.inf', '.reg', '.hta', '.jar', '.zip', '.7z', '.rar', '.tar', '.gz', '.iso', '.dmg', '.deb', '.rpm', '.apk', '.app'];
+            if (files.some(f => blocked.includes(f.name.substring(f.name.lastIndexOf('.')).toLowerCase()))) {
+                alert("One or more files have a blocked extension.");
+                return;
+            }
+
             const formData = new FormData();
             files.forEach(f => formData.append('files', f));
 
             try {
-                const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/attachments`, {
+                const res = await fetch(`${serverUrl}/api/guilds/${activeServerId}/attachments`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${currentAccount?.token || ''}` },
                     body: formData
@@ -280,6 +343,18 @@ export const MessageInput = React.memo(({
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {/* Inline send error (replaces alert() to avoid stealing input focus) */}
+            {sendError && (
+                <div data-testid="send-error-banner" style={{
+                    padding: '6px 16px', fontSize: '13px', color: '#ed4245',
+                    backgroundColor: 'rgba(237, 66, 69, 0.1)',
+                    borderBottom: '1px solid rgba(237, 66, 69, 0.3)',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                    <span>{sendError}</span>
+                    <X size={14} style={{ cursor: 'pointer', flexShrink: 0 }} onClick={() => setSendError(null)} />
+                </div>
+            )}
             {/* Pending Attachments */}
             {pendingAttachments.length > 0 && (
                 <div style={{ padding: '8px 16px', display: 'flex', gap: '8px', overflowX: 'auto', backgroundColor: 'var(--bg-secondary)', marginBottom: '8px', borderRadius: '4px' }}>
@@ -341,15 +416,22 @@ export const MessageInput = React.memo(({
                         </div>
                     </div>
                 )}
-                <div style={{ position: 'relative', backgroundColor: 'var(--bg-tertiary)', borderRadius: replyingTo ? '0 0 8px 8px' : '8px', display: 'flex', alignItems: 'center', paddingRight: '12px' }}>
+                <div style={{ position: 'relative', backgroundColor: 'var(--bg-tertiary)', borderRadius: replyingTo ? '0 0 8px 8px' : '8px', display: 'flex', alignItems: 'flex-end', paddingRight: '12px' }}>
                     <label style={{ padding: '12px', color: 'var(--interactive-normal)', cursor: 'pointer', display: 'flex' }}>
                         <ImageIcon size={20} />
                         <input type="file" multiple style={{ display: 'none' }} onChange={async (e) => {
                             if (!e.target.files?.length) return;
+                            const files = Array.from(e.target.files);
+                            const blocked = ['.exe', '.bat', '.cmd', '.msi', '.scr', '.com', '.pif', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.ps1', '.dll', '.sys', '.cpl', '.inf', '.reg', '.hta', '.jar', '.zip', '.7z', '.rar', '.tar', '.gz', '.iso', '.dmg', '.deb', '.rpm', '.apk', '.app'];
+                            if (files.some(f => blocked.includes(f.name.substring(f.name.lastIndexOf('.')).toLowerCase()))) {
+                                alert("One or more files have a blocked extension.");
+                                e.target.value = '';
+                                return;
+                            }
                             const formData = new FormData();
-                            Array.from(e.target.files).forEach(f => formData.append('files', f));
+                            files.forEach(f => formData.append('files', f));
                             try {
-                                const res = await fetch(`${serverUrl}/api/servers/${activeServerId}/attachments`, {
+                                const res = await fetch(`${serverUrl}/api/guilds/${activeServerId}/attachments`, {
                                     method: 'POST',
                                     headers: { 'Authorization': `Bearer ${currentAccount?.token || ''}` },
                                     body: formData
@@ -368,23 +450,30 @@ export const MessageInput = React.memo(({
                             e.target.value = '';
                         }} />
                     </label>
-                    <input
+                    <textarea
                         ref={inputRef}
                         className="input-field"
-                        style={{ backgroundColor: 'transparent' }}
+                        rows={1}
+                        style={{ backgroundColor: 'transparent', resize: 'none', overflow: 'hidden', lineHeight: '20px' }}
                         placeholder={`Message #${activeChannelName || 'active-channel'}`}
                         value={inputValue}
+                        maxLength={10000}
                         onChange={e => {
                             const val = e.target.value;
                             const selectionStart = e.target.selectionStart || 0;
                             setInputValue(val);
 
+                            // Auto-resize textarea
+                            const el = e.target;
+                            el.style.height = 'auto';
+                            el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+
                             // Trigger @ detection
                             const textBeforeCursor = val.substring(0, selectionStart);
                             const lastAt = textBeforeCursor.lastIndexOf('@');
-                            if (lastAt !== -1 && (lastAt === 0 || textBeforeCursor[lastAt-1] === ' ')) {
+                            if (lastAt !== -1 && (lastAt === 0 || /\s/.test(textBeforeCursor[lastAt-1]))) {
                                 const filter = textBeforeCursor.substring(lastAt + 1);
-                                if (!filter.includes(' ')) {
+                                if (!filter.includes(' ') && !filter.includes('\n')) {
                                     setAutocompleteFilter(filter);
                                     setAutocompleteStartIdx(lastAt);
                                     
@@ -430,9 +519,9 @@ export const MessageInput = React.memo(({
                                 
                                 // Trigger : detection
                                 const lastColon = textBeforeCursor.lastIndexOf(':');
-                                if (lastColon !== -1 && (lastColon === 0 || textBeforeCursor[lastColon-1] === ' ')) {
+                                if (lastColon !== -1 && (lastColon === 0 || /\s/.test(textBeforeCursor[lastColon-1]))) {
                                     const filter = textBeforeCursor.substring(lastColon + 1);
-                                    if (!filter.includes(' ')) {
+                                    if (!filter.includes(' ') && !filter.includes('\n')) {
                                         setEmojiFilter(filter);
                                         setAutocompleteStartIdx(lastColon);
                                         
@@ -466,6 +555,11 @@ export const MessageInput = React.memo(({
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                     />
+                    {inputValue.length > 9000 && (
+                        <div style={{ paddingRight: '12px', fontSize: '11px', color: inputValue.length >= 10000 ? 'var(--status-danger)' : 'var(--text-muted)' }}>
+                            {inputValue.length}/10000
+                        </div>
+                    )}
                     <Send
                         size={20}
                         color={(inputValue.trim() || pendingAttachments.length > 0) ? "var(--interactive-hover)" : "var(--interactive-normal)"}

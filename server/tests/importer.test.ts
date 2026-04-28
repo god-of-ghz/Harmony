@@ -7,17 +7,25 @@ import dbManager from '../src/database';
 vi.mock('../src/database', () => ({
     default: {
         runServerQuery: vi.fn().mockResolvedValue(undefined),
+        runGuildQuery: vi.fn(),
         beginTransaction: vi.fn().mockResolvedValue(undefined),
         commit: vi.fn().mockResolvedValue(undefined),
         rollback: vi.fn().mockResolvedValue(undefined),
         runBatch: vi.fn().mockResolvedValue(undefined),
         runNodeQuery: vi.fn().mockResolvedValue(undefined),
         initializeServerBundle: vi.fn().mockResolvedValue(undefined),
+        initializeGuildBundle: vi.fn(),
         DATA_DIR: 'mock_data',
     },
     SERVERS_DIR: 'mock_servers',
+    GUILDS_DIR: 'mock_servers',
     DATA_DIR: 'mock_data'
 }));
+
+// P18 FIX: Wire guild methods as aliases of server methods
+mockDbManager.runGuildQuery = mockDbManager.runServerQuery;
+mockDbManager.initializeGuildBundle = mockDbManager.initializeServerBundle;
+
 
 vi.mock('../src/media/downloader', () => ({
     downloadAvatar: vi.fn().mockImplementation(async (url, type) => {

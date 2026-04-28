@@ -1,12 +1,14 @@
 import React, { useCallback, useState } from 'react';
-import type { MessageData, Profile, RoleData } from '../store/appStore';
+import type { MessageData } from '../store/appStore';
 import { Permission, useAppStore } from '../store/appStore';
 import { Pencil, Trash2, Link, MessageSquareReply, Smile } from 'lucide-react';
 import { UserFingerprint } from './UserFingerprint';
 import { EmojiPicker } from './EmojiPicker';
-import { parseCustomEmojis } from '../utils/emojiParser';
-import { parseLinksInNodes } from '../utils/linkParser';
 import { MessageEmbed } from './MessageEmbed';
+import { MessageMarkdown } from './markdown/MessageMarkdown';
+import { useUserInteraction } from '../hooks/useUserInteraction';
+import { useContextMenuStore } from '../store/contextMenuStore';
+import { buildMessageMenu } from './context-menu/menuBuilders';
 
 interface MessageItemProps {
     msg: MessageData;
@@ -16,8 +18,8 @@ interface MessageItemProps {
     isAuthor: boolean;
     isEditing: boolean;
     editValue: string;
-    setEditValue: (val: string) => void;
     onEdit: (msgId: string) => void;
+    onStartEdit: (msgId: string, content: string) => void;
     onCancelEdit: () => void;
     onDelete: (msgId: string) => void;
     onAddReaction: (msgId: string, emoji: string) => void;
@@ -42,6 +44,7 @@ export const MessageItem = React.memo(({
     editValue,
     setEditValue,
     onEdit,
+    onStartEdit,
     onCancelEdit,
     onDelete,
     onAddReaction,
@@ -62,10 +65,6 @@ export const MessageItem = React.memo(({
     }, [msg.author_id]));
 
     const serverProfiles = useAppStore(state => state.serverProfiles);
-    const serverRoles = useAppStore(state => state.serverRoles);
-    const showUnknownTags = useAppStore(state => state.showUnknownTags);
-    const serverEmojisRaw = useAppStore(state => state.emojis[activeServerId || '']);
-    const serverEmojis = serverEmojisRaw || [];
     const currentUserPermissions = useAppStore(state => state.currentUserPermissions);
     const currentProfileId = useAppStore(useCallback(state => 
         state.claimedProfiles.find(p => p.server_id === activeServerId)?.id, 
@@ -74,6 +73,13 @@ export const MessageItem = React.memo(({
     const [avatarError, setAvatarError] = useState(false);
 
     const authorProfile = serverProfiles.find(p => p.id === msg.author_id);
+
+    // User interaction hook for avatar and username context menus
+    const userInteraction = useUserInteraction({
+        profileId: msg.author_id,
+        accountId: authorProfile?.account_id || undefined,
+        guildId: activeServerId || '',
+    });
     let avatarBase = authorProfile?.avatar || msg.avatar;
     
     if (avatarBase) {
@@ -94,7 +100,6 @@ export const MessageItem = React.memo(({
 
     const msgDate = new Date(msg.timestamp);
     const attachments: string[] = JSON.parse(msg.attachments || '[]');
-    const contentSegments = msg.content.split(/(<@&?[^>]+>)/g);
 
     return (
         <div data-message-id={msg.id} style={{ 
@@ -120,7 +125,29 @@ export const MessageItem = React.memo(({
                     <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--divider)' }} />
                 </div>
             )}
-            <div className={`message-container ${isMentioned ? 'mentioned-message' : ''} ${isGrouped ? 'grouped' : ''}`} style={{ position: 'relative', display: 'flex', flexDirection: 'column', padding: '8px 16px', borderLeft: isMentioned ? undefined : '2px solid transparent' }}>
+            <div className={`message-container ${isMentioned ? 'mentioned-message' : ''} ${isGrouped ? 'grouped' : ''}`} style={{ position: 'relative', display: 'flex', flexDirection: 'column', padding: '8px 16px', borderLeft: isMentioned ? undefined : '2px solid transparent' }}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    const items = buildMessageMenu({
+                        messageId: msg.id,
+                        messageContent: msg.content,
+                        authorProfileId: msg.author_id,
+                        isOwnMessage: isAuthor,
+                        currentPermissions: currentUserPermissions,
+                        channelId: msg.channel_id,
+                        guildId: activeServerId || '',
+                        onEdit: () => onStartEdit(msg.id, msg.content),
+                        onReply: () => onReply(msg),
+                        onDelete: () => onDelete(msg.id),
+                        onCopyLink: () => onCopyLink(msg.id),
+                        onAddReaction: (emoji: string) => onAddReaction(msg.id, emoji),
+                    });
+                    useContextMenuStore.getState().openContextMenu(
+                        { x: e.clientX, y: e.clientY },
+                        items
+                    );
+                }}
+            >
                 {msg.reply_to && (
                     <div className="reply-container" style={{ 
                         fontSize: '13px', 
@@ -143,7 +170,7 @@ export const MessageItem = React.memo(({
                 )}
                 <div style={{ display: 'flex', gap: '16px' }}>
                     {!isGrouped && (
-                        <div className="avatar" style={{ width: '40px', height: '40px', position: 'relative', backgroundColor: 'transparent' }}>
+                        <div className="avatar" style={{ width: '40px', height: '40px', position: 'relative', backgroundColor: 'transparent', cursor: 'pointer' }} onContextMenu={userInteraction.onContextMenu} onClick={userInteraction.onClick}>
                             {avatarUrl && !avatarError ? (
                                 <img 
                                     src={avatarUrl} 
@@ -169,49 +196,37 @@ export const MessageItem = React.memo(({
                     <div style={{ flex: 1 }} className={isGrouped ? 'message-content-wrapper' : ''}>
                         {!isGrouped && (
                             <div className="message-header" style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                                <span style={{ fontWeight: '500', color: 'var(--interactive-active)' }}>{displayName}</span>
+                                <span style={{ fontWeight: '500', color: authorProfile?.primary_role_color || 'var(--interactive-active)', cursor: 'pointer' }} onContextMenu={userInteraction.onContextMenu} onClick={userInteraction.onClick}>{displayName}</span>
                                 <UserFingerprint publicKey={msg.public_key} />
                                 {msg.edited_at && <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '4px' }}>(edited)</span>}
                             </div>
                         )}
                         {isEditing ? (
                             <div style={{ marginTop: '8px' }}>
-                                <input
+                                <textarea
                                     className="input-field"
                                     autoFocus
+                                    rows={1}
                                     value={editValue}
-                                    onChange={e => setEditValue(e.target.value)}
+                                    onChange={e => {
+                                        setEditValue(e.target.value);
+                                        // Auto-resize
+                                        e.target.style.height = 'auto';
+                                        e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+                                    }}
                                     onKeyDown={e => {
-                                        if (e.key === 'Enter') onEdit(msg.id);
+                                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEdit(msg.id); }
                                         if (e.key === 'Escape') onCancelEdit();
                                     }}
+                                    style={{ backgroundColor: 'transparent', resize: 'none', overflow: 'hidden', lineHeight: '20px', width: '100%' }}
                                 />
                                 <div style={{ fontSize: '12px', marginTop: '4px', color: 'var(--text-muted)' }}>
                                     escape to <span style={{ color: 'var(--text-link)', cursor: 'pointer' }} onClick={onCancelEdit}>cancel</span> • enter to <span style={{ color: 'var(--text-link)', cursor: 'pointer' }} onClick={() => onEdit(msg.id)}>save</span>
                                 </div>
                             </div>
                         ) : (
-                            <div style={{ marginTop: isGrouped ? '0' : '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: '1.4' }}>
-                                {contentSegments.map((segment, idx) => {
-                                    if (segment.startsWith('<@&') && segment.endsWith('>')) {
-                                        const id = segment.slice(3, -1);
-                                        const r = serverRoles.find((role: RoleData) => role.id === id);
-                                        return <span key={idx} className="mention-tag" style={{ borderLeft: r ? `2px solid ${r.color}` : undefined }}>@{r ? r.name : 'Unknown Role'}</span>;
-                                    }
-                                    if (segment.startsWith('<@') && segment.endsWith('>')) {
-                                        let id = segment.slice(2, -1);
-                                        if (id.startsWith('!')) id = id.slice(1);
-                                        const p = serverProfiles.find((profile: Profile) => profile.id === id || (profile.aliases && profile.aliases.split(',').map((a: string) => a.trim()).includes(id)));
-                                        if (p) {
-                                            return <span key={idx} className="mention-tag">@{p.nickname}</span>;
-                                        } else if (showUnknownTags) {
-                                            return <span key={idx}>{parseLinksInNodes(parseCustomEmojis(segment, serverEmojis))}</span>;
-                                        } else {
-                                            return <span key={idx} className="mention-tag">@Unknown User</span>;
-                                        }
-                                    }
-                                    return <React.Fragment key={idx}>{parseLinksInNodes(parseCustomEmojis(segment, serverEmojis))}</React.Fragment>;
-                                })}
+                            <div style={{ marginTop: isGrouped ? '0' : '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: '1.4' }} className="markdown-content">
+                                <MessageMarkdown content={msg.content} />
                                 {!isGrouped && msg.edited_at && <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '4px' }}>(edited)</span>}
                                 {isGrouped && msg.edited_at && <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: '4px' }}>(edited)</span>}
                             </div>
@@ -220,13 +235,12 @@ export const MessageItem = React.memo(({
                         {attachments.length > 0 && (
                             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
                                 {attachments.map((url: string, i: number) => {
-                                    const fullUrl = `${serverMap[activeServerId!]}${url}`;
+                                    const finalUrl = url.startsWith('/uploads/channels/') ? `/uploads/${activeServerId}/channels/${url.substring('/uploads/channels/'.length)}` : url;
+                                    const fullUrl = `${serverMap[activeServerId!] || ''}${finalUrl}`;
                                     const ext = url.split('.').pop()?.toLowerCase();
                                     if (ext === 'mp4' || ext === 'webm') {
                                         return (
-                                            <div key={i} style={{ maxWidth: '400px', maxHeight: '400px', borderRadius: '4px', overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.2)' }}>
-                                                <video src={fullUrl} controls playsInline preload="metadata" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }} />
-                                            </div>
+                                            <video key={i} src={fullUrl} controls playsInline preload="metadata" style={{ maxWidth: '400px', maxHeight: '400px', borderRadius: '4px', backgroundColor: 'rgba(0,0,0,0.2)', display: 'block' }} />
                                         );
                                     } else if (ext === 'txt') {
                                         return <a key={i} href={fullUrl} target="_blank" rel="noreferrer" style={{ padding: '8px 12px', backgroundColor: 'var(--bg-modifier-selected)', borderRadius: '4px', textDecoration: 'none', color: 'var(--text-normal)', border: '1px solid var(--divider)' }}>📄 View Text File</a>;
@@ -319,7 +333,7 @@ export const MessageItem = React.memo(({
                             <>
                                 {isAuthor && (
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }}>
-                                        <Pencil size={16} style={{ cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => { onCancelEdit(); onEdit(msg.id); setEditValue(msg.content); }} />
+                                        <Pencil data-testid="edit-message" size={16} style={{ cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => onStartEdit(msg.id, msg.content)} />
                                     </div>
                                 )}
 

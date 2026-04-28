@@ -1,4 +1,31 @@
 import { create } from 'zustand';
+import { apiFetch } from '../utils/apiFetch';
+
+export interface AccountSettings {
+    notifications?: {
+        muteAll?: boolean;
+        muteMentions?: boolean;
+        muteEveryone?: boolean;
+        sound?: string;
+    };
+}
+
+export interface ClientSettings {
+    theme?: 'light' | 'dark' | 'system';
+}
+
+export interface AudioSettings {
+    noiseSuppression: boolean;
+    echoCancellation: boolean;
+    autoGainControl: boolean;
+    inputDeviceId?: string;
+    outputDeviceId?: string;
+    videoCameraId?: string;
+    inputMode?: 'voiceActivity' | 'pushToTalk';
+    pttKey?: string;
+    voiceActivityMode?: 'auto' | 'manual';
+    voiceActivityThreshold?: number;
+}
 
 export interface Account {
     id: string;
@@ -10,8 +37,19 @@ export interface Account {
     encrypted_private_key?: string;
     key_salt?: string;
     key_iv?: string;
-    trusted_servers?: string[];
+    // TODO [VISION:V1] Multi-Token Architecture — Currently the client stores a single
+    // JWT (`token`) signed by the login server. All API requests to all nodes use this
+    // same token. When the issuing server goes offline, other nodes can't verify the
+    // token after their 5-minute PKI cache expires, locking the user out of the entire
+    // federation. V1 should introduce a `tokenMap: Record<nodeUrl, string>` where each
+    // connected node issues its own JWT signed by its own key. This eliminates the
+    // single-point-of-failure and makes auth fully local on every node.
+    // See also: apiFetch.ts, ChatArea.tsx (WS auth), app.ts (generateToken).
     token?: string;
+    authority_role?: string;
+    delegation_cert?: string;
+    primary_server_url?: string;
+    dismissed_global_claim?: boolean;
 }
 
 export interface Relationship {
@@ -23,6 +61,7 @@ export interface Relationship {
 
 export interface GlobalProfile {
     account_id: string;
+    display_name: string;
     bio: string;
     status_message: string;
     avatar_url: string;
@@ -39,6 +78,7 @@ export interface Profile {
     role: string;
     aliases: string;
     public_key?: string | null;
+    primary_role_color?: string | null;
 }
 
 export interface RoleData {
@@ -50,11 +90,14 @@ export interface RoleData {
     position: number;
 }
 
-export interface ServerData {
+export interface GuildData {
     id: string;
     name: string;
     icon: string;
 }
+
+/** @deprecated Use GuildData */
+export type ServerData = GuildData;
 
 export interface CategoryData {
     id: string;
@@ -106,6 +149,16 @@ export interface PresenceData {
     lastUpdated: number;
 }
 
+/** Represents a node connection in the user's account-bound server list (from account_servers table). */
+export interface ConnectedNode {
+    url: string;
+    trust_level: 'trusted' | 'untrusted';
+    status: 'active' | 'disconnected';
+}
+
+/** @deprecated Use ConnectedNode */
+export type ConnectedServer = ConnectedNode;
+
 export const Permission = {
     ADMINISTRATOR: 1 << 0,
     MANAGE_SERVER: 1 << 1,
@@ -132,7 +185,16 @@ interface AppState {
     addClaimedProfile: (profile: Profile) => void;
     updateClaimedProfile: (profile: Profile) => void;
 
+    guilds: GuildData[];
+    setGuilds: (guilds: GuildData[]) => void;
+    /** Eagerly add a guild entry (de-duplicated by id). */
+    addGuild: (guild: GuildData) => void;
+
+    activeGuildId: string | null;
+    setActiveGuildId: (id: string) => void;
+    /** @deprecated Use activeGuildId */
     activeServerId: string | null;
+    /** @deprecated Use setActiveGuildId */
     setActiveServerId: (id: string) => void;
 
     activeChannelId: string | null;
@@ -142,17 +204,30 @@ interface AppState {
     activeVoiceChannelId: string | null;
     setActiveVoiceChannelId: (id: string | null) => void;
 
+    isMuted: boolean;
+    setIsMuted: (muted: boolean) => void;
+    isDeafened: boolean;
+    setIsDeafened: (deafened: boolean) => void;
+    audioSettings: AudioSettings;
+    setAudioSettings: (settings: Partial<AudioSettings>) => void;
+
     showUnknownTags: boolean;
     setShowUnknownTags: (show: boolean) => void;
 
-    knownServers: string[];
-    setKnownServers: (urls: string[]) => void;
-    addKnownServer: (url: string) => void;
+    /** Node list sourced from the account_servers table — replaces knownServers + trustedServers. */
+    connectedServers: ConnectedNode[];
+    setConnectedServers: (servers: ConnectedNode[]) => void;
 
-    trustedServers: string[];
-    setTrustedServers: (urls: string[]) => void;
-
+    // TODO [VISION:Beta] This simple guildId→URL mapping should be replaced with the
+    // full `ServerTransport` registry defined in HARMONY_VISION.md: { fingerprint,
+    // localUrl, publicUrl, preferLocal, lastSeenLocal }. This enables adaptive
+    // LAN/internet switching where the client auto-routes to localUrl when at home
+    // and falls back to publicUrl when remote. Not needed during alpha stabilization.
+    guildMap: Record<string, string>;
+    setGuildMap: (map: Record<string, string>) => void;
+    /** @deprecated Use guildMap */
     serverMap: Record<string, string>;
+    /** @deprecated Use setGuildMap */
     setServerMap: (map: Record<string, string>) => void;
 
     isGuestSession: boolean;
@@ -161,11 +236,21 @@ interface AppState {
     sessionPrivateKey: CryptoKey | null;
     setSessionPrivateKey: (key: CryptoKey | null) => void;
 
+    guildRoles: RoleData[];
+    setGuildRoles: (roles: RoleData[]) => void;
+    /** @deprecated Use guildRoles */
     serverRoles: RoleData[];
+    /** @deprecated Use setGuildRoles */
     setServerRoles: (roles: RoleData[]) => void;
 
+    guildProfiles: Profile[];
+    setGuildProfiles: (profiles: Profile[]) => void;
+    updateGuildProfile: (profile: Profile) => void;
+    /** @deprecated Use guildProfiles */
     serverProfiles: Profile[];
+    /** @deprecated Use setGuildProfiles */
     setServerProfiles: (profiles: Profile[]) => void;
+    /** @deprecated Use updateGuildProfile */
     updateServerProfile: (profile: Profile) => void;
 
     presenceMap: Record<string, PresenceData>;
@@ -191,17 +276,18 @@ interface AppState {
     currentUserPermissions: number;
     setCurrentUserPermissions: (perms: number) => void;
 
-    isSearchSidebarOpen: boolean;
+    searchStateByGuild: Record<string, { isOpen: boolean, query: string, results: any[] }>;
     setSearchSidebarOpen: (open: boolean) => void;
-    searchQuery: string;
     setSearchQuery: (query: string) => void;
-    searchResults: any[];
     setSearchResults: (results: any[]) => void;
+    clearGuildSearchState: (guildId: string) => void;
 
     pendingJump: { channelId: string, messageId: string } | null;
     setPendingJump: (jump: { channelId: string, messageId: string } | null) => void;
 
     emojis: Record<string, EmojiData[]>;
+    fetchGuildEmojis: (guildId: string) => Promise<void>;
+    /** @deprecated Use fetchGuildEmojis */
     fetchServerEmojis: (serverId: string) => Promise<void>;
 
     zoomedImageUrl: string | null;
@@ -211,19 +297,37 @@ interface AppState {
     setUnclaimedProfiles: (profiles: Profile[]) => void;
     dismissedGlobalClaim: boolean;
     setDismissedGlobalClaim: (dismissed: boolean) => void;
+    
+    nodeStatus: Record<string, 'online' | 'offline' | 'unknown'>;
+    setNodeStatus: (status: Record<string, 'online' | 'offline' | 'unknown'>) => void;
+    /** @deprecated Use nodeStatus */
+    serverStatus: Record<string, 'online' | 'offline' | 'unknown'>;
+    /** @deprecated Use setNodeStatus */
+    setServerStatus: (status: Record<string, 'online' | 'offline' | 'unknown'>) => void;
+    
+    primaryOfflineMessage: string | null;
+    setPrimaryOfflineMessage: (msg: string | null) => void;
+
+    showGuildSettings: boolean;
+    setShowGuildSettings: (show: boolean) => void;
+
+    showUserSettings: boolean;
+    setShowUserSettings: (show: boolean) => void;
+
+    profilesLoaded: boolean;
+    setProfilesLoaded: (loaded: boolean) => void;
+
+    accountSettings: AccountSettings;
+    setAccountSettings: (settings: Partial<AccountSettings>) => void;
+    updateAccountSettings: (settings: Partial<AccountSettings>) => Promise<void>;
+    
+    clientSettings: ClientSettings;
+    setClientSettings: (settings: Partial<ClientSettings>) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
     currentAccount: null,
     setCurrentAccount: (account) => {
-        if (account && account.token) {
-            // Update cached storage if it exists
-            const cached = localStorage.getItem('harmony_account');
-            if (cached) {
-                const parsed = JSON.parse(cached);
-                localStorage.setItem('harmony_account', JSON.stringify({ ...parsed, token: account.token }));
-            }
-        }
         set({ currentAccount: account });
     },
 
@@ -232,57 +336,104 @@ export const useAppStore = create<AppState>((set, get) => ({
     addClaimedProfile: (profile) => set((state) => ({ claimedProfiles: [...state.claimedProfiles, profile] })),
     updateClaimedProfile: (profile) => set((state) => ({ claimedProfiles: state.claimedProfiles.map(p => p.id === profile.id && p.server_id === profile.server_id ? profile : p) })),
 
-    activeServerId: localStorage.getItem('harmony_active_server_id'),
+    guilds: [],
+    setGuilds: (guilds) => set({ guilds }),
+    addGuild: (guild) => set((state) => {
+        if (state.guilds.some(g => g.id === guild.id)) return state;
+        return { guilds: [...state.guilds, guild] };
+    }),
+
+    activeGuildId: null,
+    activeServerId: null, // @deprecated alias — kept in sync with activeGuildId
+    setActiveGuildId: (id) => {
+        set({ activeGuildId: id, activeServerId: id, activeChannelId: null, activeChannelName: '', currentUserPermissions: 0 });
+    },
+    // @deprecated — use setActiveGuildId
     setActiveServerId: (id) => {
-        localStorage.setItem('harmony_active_server_id', id || '');
-        localStorage.removeItem('harmony_active_channel_id');
-        localStorage.removeItem('harmony_active_channel_name');
-        set({ activeServerId: id, activeChannelId: null, activeChannelName: '', currentUserPermissions: 0 });
+        set({ activeGuildId: id, activeServerId: id, activeChannelId: null, activeChannelName: '', currentUserPermissions: 0 });
     },
 
-    activeChannelId: localStorage.getItem('harmony_active_channel_id'),
-    activeChannelName: localStorage.getItem('harmony_active_channel_name') || '',
+    activeChannelId: null,
+    activeChannelName: '',
     setActiveChannelId: (id, name = '') => {
-        localStorage.setItem('harmony_active_channel_id', id);
-        localStorage.setItem('harmony_active_channel_name', name);
         set({ activeChannelId: id, activeChannelName: name });
     },
 
     activeVoiceChannelId: null,
     setActiveVoiceChannelId: (id) => set({ activeVoiceChannelId: id }),
 
+    isMuted: false,
+    setIsMuted: (muted) => set({ isMuted: muted }),
+    isDeafened: false,
+    setIsDeafened: (deafened) => set({ isDeafened: deafened }),
+
+    audioSettings: (() => {
+        try {
+            const stored = localStorage.getItem('harmony_audio_settings');
+            if (stored) return JSON.parse(stored);
+        } catch (e) {}
+        return { noiseSuppression: true, echoCancellation: true, autoGainControl: true, inputMode: 'voiceActivity', voiceActivityMode: 'auto', voiceActivityThreshold: -50, pttKey: '' };
+    })(),
+    setAudioSettings: (settings) => set((state) => {
+        const next = { ...state.audioSettings, ...settings };
+        localStorage.setItem('harmony_audio_settings', JSON.stringify(next));
+        return { audioSettings: next };
+    }),
+
+    accountSettings: {},
+    setAccountSettings: (settings) => set((state) => ({ accountSettings: { ...state.accountSettings, ...settings } })),
+    updateAccountSettings: async (settings) => {
+        const state = get();
+        const next = { ...state.accountSettings, ...settings };
+        set({ accountSettings: next });
+        
+        if (state.currentAccount?.token && state.currentAccount.primary_server_url) {
+            try {
+                await apiFetch(`${state.currentAccount.primary_server_url}/api/accounts/settings`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.currentAccount.token}`
+                    },
+                    body: JSON.stringify(next)
+                });
+            } catch (err) {
+                console.error('Failed to sync account settings', err);
+            }
+        }
+    },
+
+    clientSettings: (() => {
+        try {
+            const stored = localStorage.getItem('harmony_client_settings');
+            if (stored) return JSON.parse(stored);
+        } catch (e) {}
+        return { theme: 'dark' };
+    })(),
+    setClientSettings: (settings) => set((state) => {
+        const next = { ...state.clientSettings, ...settings };
+        localStorage.setItem('harmony_client_settings', JSON.stringify(next));
+        if (next.theme) {
+            if (next.theme === 'light') document.body.classList.add('theme-light');
+            else document.body.classList.remove('theme-light');
+        }
+        return { clientSettings: next };
+    }),
+
     showUnknownTags: false,
     setShowUnknownTags: (show: boolean) => set({ showUnknownTags: show }),
 
-    knownServers: (() => {
-        try {
-            const stored = localStorage.getItem('harmony_known_servers');
-            if (!stored) return [];
-            const parsed = JSON.parse(stored);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-            return [];
-        }
-    })(),
-    setKnownServers: (urls) => {
-        const safeUrls = Array.isArray(urls) ? urls : [];
-        localStorage.setItem('harmony_known_servers', JSON.stringify(safeUrls));
-        set({ knownServers: safeUrls });
+    connectedServers: [],
+    setConnectedServers: (servers) => {
+        const safe = Array.isArray(servers) ? servers : [];
+        set({ connectedServers: safe });
     },
-    addKnownServer: (url) => set((state) => {
-        if (!state.knownServers.includes(url)) {
-            const newServers = [...state.knownServers, url];
-            localStorage.setItem('harmony_known_servers', JSON.stringify(newServers));
-            return { knownServers: newServers };
-        }
-        return state;
-    }),
 
-    trustedServers: [],
-    setTrustedServers: (urls) => set({ trustedServers: Array.isArray(urls) ? urls : [] }),
-
-    serverMap: {},
-    setServerMap: (map) => set({ serverMap: map }),
+    guildMap: {},
+    serverMap: {}, // @deprecated alias — kept in sync with guildMap
+    setGuildMap: (map) => set({ guildMap: map, serverMap: map }),
+    // @deprecated — use setGuildMap
+    setServerMap: (map) => set({ guildMap: map, serverMap: map }),
 
     isGuestSession: false,
     setIsGuestSession: (isGuest) => set({ isGuestSession: isGuest }),
@@ -290,17 +441,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionPrivateKey: null,
     setSessionPrivateKey: (key) => set({ sessionPrivateKey: key }),
 
-    serverRoles: [],
-    setServerRoles: (roles) => set({ serverRoles: roles }),
+    guildRoles: [],
+    serverRoles: [], // @deprecated alias — kept in sync with guildRoles
+    setGuildRoles: (roles) => set({ guildRoles: roles, serverRoles: roles }),
+    // @deprecated — use setGuildRoles
+    setServerRoles: (roles) => set({ guildRoles: roles, serverRoles: roles }),
 
-    serverProfiles: [],
-    setServerProfiles: (profiles) => set({ serverProfiles: profiles }),
-    updateServerProfile: (profile) => set((state) => {
-        const exists = state.serverProfiles.some(p => p.id === profile.id);
+    guildProfiles: [],
+    serverProfiles: [], // @deprecated alias — kept in sync with guildProfiles
+    setGuildProfiles: (profiles) => set({ guildProfiles: profiles, serverProfiles: profiles }),
+    // @deprecated — use setGuildProfiles
+    setServerProfiles: (profiles) => set({ guildProfiles: profiles, serverProfiles: profiles }),
+    updateGuildProfile: (profile) => set((state) => {
+        const exists = state.guildProfiles.some(p => p.id === profile.id);
         if (exists) {
-            return { serverProfiles: state.serverProfiles.map(p => p.id === profile.id ? profile : p) };
+            return { guildProfiles: state.guildProfiles.map(p => p.id === profile.id ? profile : p), serverProfiles: state.guildProfiles.map(p => p.id === profile.id ? profile : p) };
         }
-        return { serverProfiles: [...state.serverProfiles, profile] };
+        return { guildProfiles: [...state.guildProfiles, profile], serverProfiles: [...state.guildProfiles, profile] };
+    }),
+    // @deprecated — use updateGuildProfile
+    updateServerProfile: (profile) => set((state) => {
+        const exists = state.guildProfiles.some(p => p.id === profile.id);
+        if (exists) {
+            return { guildProfiles: state.guildProfiles.map(p => p.id === profile.id ? profile : p), serverProfiles: state.guildProfiles.map(p => p.id === profile.id ? profile : p) };
+        }
+        return { guildProfiles: [...state.guildProfiles, profile], serverProfiles: [...state.guildProfiles, profile] };
     }),
 
     presenceMap: {},
@@ -347,26 +512,49 @@ export const useAppStore = create<AppState>((set, get) => ({
     currentUserPermissions: 0,
     setCurrentUserPermissions: (perms) => set({ currentUserPermissions: perms }),
 
-    isSearchSidebarOpen: false,
-    setSearchSidebarOpen: (open) => set({ isSearchSidebarOpen: open }),
-    searchQuery: '',
-    setSearchQuery: (query) => set({ searchQuery: query }),
-    searchResults: [],
-    setSearchResults: (results) => set({ searchResults: results }),
+    searchStateByGuild: {},
+    clearGuildSearchState: (guildId) => set((state) => {
+        const next = { ...state.searchStateByGuild };
+        delete next[guildId];
+        return { searchStateByGuild: next };
+    }),
+    setSearchSidebarOpen: (open) => set((state) => {
+        const guildId = state.activeGuildId;
+        if (!guildId) return state;
+        if (!open) {
+            const next = { ...state.searchStateByGuild };
+            delete next[guildId];
+            return { searchStateByGuild: next };
+        }
+        const current = state.searchStateByGuild[guildId] || { isOpen: false, query: '', results: [] };
+        return { searchStateByGuild: { ...state.searchStateByGuild, [guildId]: { ...current, isOpen: open } } };
+    }),
+    setSearchQuery: (query) => set((state) => {
+        const guildId = state.activeGuildId;
+        if (!guildId) return state;
+        const current = state.searchStateByGuild[guildId] || { isOpen: false, query: '', results: [] };
+        return { searchStateByGuild: { ...state.searchStateByGuild, [guildId]: { ...current, query } } };
+    }),
+    setSearchResults: (results) => set((state) => {
+        const guildId = state.activeGuildId;
+        if (!guildId) return state;
+        const current = state.searchStateByGuild[guildId] || { isOpen: false, query: '', results: [] };
+        return { searchStateByGuild: { ...state.searchStateByGuild, [guildId]: { ...current, results } } };
+    }),
 
     pendingJump: null,
     setPendingJump: (jump) => set({ pendingJump: jump }),
 
     emojis: {},
-    fetchServerEmojis: async (serverId) => {
+    fetchGuildEmojis: async (guildId) => {
         const state = get();
-        if (state.emojis[serverId]) return;
+        if (state.emojis[guildId]) return;
 
         const token = state.currentAccount?.token;
         if (!token) return;
 
         try {
-            const response = await fetch(`/api/servers/${serverId}/emojis`, {
+            const response = await fetch(`/api/guilds/${guildId}/emojis`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -376,13 +564,17 @@ export const useAppStore = create<AppState>((set, get) => ({
                 set((state) => ({
                     emojis: {
                         ...state.emojis,
-                        [serverId]: data
+                        [guildId]: data
                     }
                 }));
             }
         } catch (error) {
             console.error('Failed to fetch emojis:', error);
         }
+    },
+    // @deprecated — use fetchGuildEmojis
+    fetchServerEmojis: async (serverId) => {
+        return get().fetchGuildEmojis(serverId);
     },
 
     zoomedImageUrl: null,
@@ -392,4 +584,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     setUnclaimedProfiles: (profiles) => set({ unclaimedProfiles: profiles }),
     dismissedGlobalClaim: false,
     setDismissedGlobalClaim: (dismissed) => set({ dismissedGlobalClaim: dismissed }),
+    
+    nodeStatus: {},
+    serverStatus: {}, // @deprecated alias — kept in sync with nodeStatus
+    setNodeStatus: (status) => set({ nodeStatus: status, serverStatus: status }),
+    // @deprecated — use setNodeStatus
+    setServerStatus: (status) => set({ nodeStatus: status, serverStatus: status }),
+    
+    primaryOfflineMessage: null,
+    setPrimaryOfflineMessage: (msg) => set({ primaryOfflineMessage: msg }),
+
+    showGuildSettings: false,
+    setShowGuildSettings: (show) => set({ showGuildSettings: show }),
+
+    showUserSettings: false,
+    setShowUserSettings: (show) => set({ showUserSettings: show }),
+
+    profilesLoaded: false,
+    setProfilesLoaded: (loaded) => set({ profilesLoaded: loaded }),
 }));
+
+if (typeof window !== 'undefined') {
+    (window as any).useAppStore = useAppStore;
+}

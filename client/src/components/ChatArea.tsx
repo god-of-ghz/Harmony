@@ -8,7 +8,11 @@ import { MessageList } from './MessageList';
 import { TypingIndicator } from './TypingIndicator';
 import { PhoneCall, Search } from 'lucide-react';
 import { SearchSidebar } from './SearchSidebar';
+import { MemberSidebar } from './MemberSidebar';
 import { convertToWsUrl } from '../utils/url';
+import { apiFetch } from '../utils/apiFetch';
+import { useContextMenuStore } from '../store/contextMenuStore';
+import { buildChannelMenu } from './context-menu/menuBuilders';
 
 export const ChatArea = () => {
     // Targeted Selectors (Only the ones that don't change frequently)
@@ -24,13 +28,20 @@ export const ChatArea = () => {
     const setActiveVoiceChannelId = useAppStore(state => state.setActiveVoiceChannelId);
     const serverProfiles = useAppStore(state => state.serverProfiles);
 
-    const isSearchSidebarOpen = useAppStore(state => state.isSearchSidebarOpen);
+    const isSearchSidebarOpen = useAppStore(state => state.activeServerId ? (state.searchStateByGuild[state.activeServerId]?.isOpen ?? false) : false);
     const setSearchSidebarOpen = useAppStore(state => state.setSearchSidebarOpen);
+    const currentUserPermissions = useAppStore(state => state.currentUserPermissions);
+    const unreadChannels = useAppStore(state => state.unreadChannels);
 
     const [messages, setMessages] = useState<MessageData[]>([]);
+    const [wsConnected, setWsConnected] = useState(false);
     const [firstItemIndex, setFirstItemIndex] = useState(1000000);
     const [hasMoreMessages, setHasMoreMessages] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    
+    const [hasNewerMessages, setHasNewerMessages] = useState(false);
+    const [isLoadingNewer, setIsLoadingNewer] = useState(false);
+
     const messageListRef = useRef<any>(null);
 
     // Editing state
@@ -81,7 +92,7 @@ export const ChatArea = () => {
         if (!activeServerId || !serverMap[activeServerId]) return;
 
         // Fetch profiles
-        fetch(`${serverMap[activeServerId]}/api/servers/${activeServerId}/profiles`, {
+        apiFetch(`${serverMap[activeServerId]}/api/guilds/${activeServerId}/profiles`, {
             headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
         })
             .then(res => res.ok ? res.json() : [])
@@ -89,7 +100,7 @@ export const ChatArea = () => {
             .catch(console.error);
 
         // Fetch roles
-        fetch(`${serverMap[activeServerId]}/api/servers/${activeServerId}/roles`, {
+        apiFetch(`${serverMap[activeServerId]}/api/guilds/${activeServerId}/roles`, {
             headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
         })
             .then(res => res.ok ? res.json() : [])
@@ -105,13 +116,14 @@ export const ChatArea = () => {
         setMessages([]);
         setFirstItemIndex(1000000);
         setHasMoreMessages(true);
+        setHasNewerMessages(false);
 
         if (currentPendingJump && currentPendingJump.channelId === activeChannelId) {
             const { messageId } = currentPendingJump;
             // Do NOT clear pendingJump here to avoid React Strict Mode double-effect bug.
             // It will be cleared inside onJumpComplete in MessageList.
             
-            fetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages/around/${messageId}`, {
+            apiFetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages/around/${messageId}`, {
                 headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
             })
                 .then(res => res.ok ? res.json() : [])
@@ -120,6 +132,7 @@ export const ChatArea = () => {
                     const decrypted = await decryptMessages(safeData);
                     setMessages(decrypted);
                     setHasMoreMessages(true);
+                    setHasNewerMessages(true); // Jump goes back in time
                     setJumpToMessageId(messageId);
                     // Do NOT clear pendingJump here — onJumpComplete clears it after scroll finishes
                 })
@@ -127,7 +140,7 @@ export const ChatArea = () => {
             return;
         }
 
-        fetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}`, {
+        apiFetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}`, {
             headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
         })
             .then(res => res.ok ? res.json() : [])
@@ -136,6 +149,7 @@ export const ChatArea = () => {
                 const decrypted = await decryptMessages(safeData);
                 setMessages(decrypted);
                 if (safeData.length < LIMIT) setHasMoreMessages(false);
+                setHasNewerMessages(false);
             })
             .catch(console.error);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,7 +159,7 @@ export const ChatArea = () => {
         if (!activeChannelId || !activeServerId || !serverMap[activeServerId] || messages.length === 0) return;
         const lastMessage = messages[messages.length - 1];
         if (lastMessage) {
-            fetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/read`, {
+            apiFetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/read`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -168,16 +182,21 @@ export const ChatArea = () => {
         let isIdle = false;
         let idleTimer: ReturnType<typeof setTimeout>;
         let lastActivity = Date.now();
+        let openedAt = 0;
+        let wasRejected = false;
 
         const resetIdleTimer = () => {
+            // Guard: only send if the WebSocket is actually open and wasn't rejected
+            if (ws.readyState !== WebSocket.OPEN || wasRejected) return;
             if (isIdle) {
                 isIdle = false;
-                ws.send(JSON.stringify({ type: 'PRESENCE_UPDATE', data: { status: 'online' } }));
+                try { ws.send(JSON.stringify({ type: 'PRESENCE_UPDATE', data: { status: 'online' } })); } catch {}
             }
             clearTimeout(idleTimer);
             idleTimer = setTimeout(() => {
+                if (ws.readyState !== WebSocket.OPEN || wasRejected) return;
                 isIdle = true;
-                ws.send(JSON.stringify({ type: 'PRESENCE_UPDATE', data: { status: 'idle' } }));
+                try { ws.send(JSON.stringify({ type: 'PRESENCE_UPDATE', data: { status: 'idle' } })); } catch {}
             }, 5 * 60 * 1000);
         };
 
@@ -185,13 +204,19 @@ export const ChatArea = () => {
             const now = Date.now();
             if (now - lastActivity > 1000) {
                 lastActivity = now;
-                if (ws.readyState === WebSocket.OPEN) {
+                if (ws.readyState === WebSocket.OPEN && !wasRejected) {
                     resetIdleTimer();
                 }
             }
         };
 
         ws.onopen = () => {
+            openedAt = Date.now();
+            setWsConnected(true);
+            // TODO [VISION:V1] Multi-Token Architecture — When per-node tokens are
+            // implemented, this should send the token for the specific node this
+            // WebSocket connects to (from tokenMap[serverUrl]) instead of the
+            // single global token. See appStore.ts for tokenMap design.
             const currentToken = useAppStore.getState().currentAccount?.token;
             if (currentToken) {
                 ws.send(JSON.stringify({ type: 'PRESENCE_IDENTIFY', data: { token: currentToken } }));
@@ -237,18 +262,50 @@ export const ChatArea = () => {
                     }
                 } else if (payload.type === 'TYPING_START' || payload.type === 'TYPING_STOP') {
                     typingListenersRef.current.forEach(listener => listener(payload));
+                } else if (payload.type === 'GUILD_STATUS_CHANGE') {
+                    // Guild suspended/stopped — navigate away if currently viewing it
+                    if (payload.data.status !== 'active' && payload.data.guildId === activeServerId) {
+                        console.warn(`[WS] Guild ${payload.data.guildId} status changed to ${payload.data.status}`);
+                        useAppStore.getState().setActiveServerId(null);
+                        useAppStore.getState().setActiveChannelId(null);
+                    }
+                } else if (payload.type === 'GUILD_DELETED') {
+                    if (payload.data.guildId === activeServerId) {
+                        useAppStore.getState().setActiveServerId(null);
+                        useAppStore.getState().setActiveChannelId(null);
+                    }
+                } else if (payload.type === 'MEMBER_JOIN' || payload.type === 'MEMBER_LEAVE') {
+                    // Refresh profiles if this affects the active guild
+                    if (payload.data?.server_id === activeServerId || payload.guildId === activeServerId) {
+                        if (payload.type === 'MEMBER_JOIN' && payload.data) {
+                            const { updateServerProfile } = useAppStore.getState();
+                            updateServerProfile(payload.data);
+                        }
+                    }
                 }
             } catch (e) { }
         };
 
+        ws.onclose = () => {
+            // Detect rapid close (server rejected connection, e.g., account deactivated)
+            if (openedAt > 0 && Date.now() - openedAt < 2000) {
+                wasRejected = true;
+            }
+        };
+
         return () => {
+            wasRejected = true; // Prevent any pending callbacks from firing
             ws.close();
             wsRef.current = null;
+            setWsConnected(false);
             clearTimeout(idleTimer);
             window.removeEventListener('mousemove', onUserActivity);
             window.removeEventListener('keydown', onUserActivity);
         };
-    }, [activeChannelId, activeServerId, serverMap]);
+    // Including currentAccount?.token forces a WS reconnect when the token changes
+    // (e.g., after a primary promotion), ensuring PRESENCE_IDENTIFY sends the fresh JWT.
+    }, [activeChannelId, activeServerId, serverMap, currentAccount?.token]);
+
 
     const messagesRef = useRef(messages);
     useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -259,7 +316,7 @@ export const ChatArea = () => {
         setIsLoadingMore(true);
         const oldestMessage = messagesRef.current[0];
 
-        fetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}&cursor=${encodeURIComponent(oldestMessage.timestamp)}`, {
+        apiFetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}&cursor=${encodeURIComponent(oldestMessage.timestamp)}`, {
             headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
         })
             .then(res => res.ok ? res.json() : [])
@@ -273,7 +330,29 @@ export const ChatArea = () => {
             })
             .catch(console.error)
             .finally(() => setIsLoadingMore(false));
-    }, [isLoadingMore, hasMoreMessages, activeChannelId, activeServerId, serverMap]);
+    }, [isLoadingMore, hasMoreMessages, activeChannelId, activeServerId, serverMap, currentAccount]);
+
+    const handleLoadNewer = useCallback(() => {
+        if (isLoadingNewer || !hasNewerMessages || !activeChannelId || messagesRef.current.length === 0) return;
+
+        setIsLoadingNewer(true);
+        const newestMessage = messagesRef.current[messagesRef.current.length - 1];
+
+        apiFetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}&cursor=${encodeURIComponent(newestMessage.timestamp)}&direction=after`, {
+            headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+        })
+            .then(res => res.ok ? res.json() : [])
+            .then(async data => {
+                const safeData = Array.isArray(data) ? data : [];
+                if (safeData.length < LIMIT) setHasNewerMessages(false);
+                if (safeData.length > 0) {
+                    const decrypted = await decryptMessages(safeData);
+                    setMessages((prev: MessageData[]) => [...prev, ...decrypted]);
+                }
+            })
+            .catch(console.error)
+            .finally(() => setIsLoadingNewer(false));
+    }, [isLoadingNewer, hasNewerMessages, activeChannelId, activeServerId, serverMap, currentAccount, decryptMessages]);
 
     const handleCopyLink = useCallback((msgId: string) => {
         let base = window.location.origin;
@@ -286,7 +365,7 @@ export const ChatArea = () => {
 
     const handleAddReaction = useCallback(async (messageId: string, emoji: string) => {
         if (!activeChannelId || !activeServerId) return;
-        fetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages/${messageId}/reactions`, {
+        apiFetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages/${messageId}/reactions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentAccount?.token || ''}` },
             body: JSON.stringify({ emoji })
@@ -295,7 +374,7 @@ export const ChatArea = () => {
 
     const handleRemoveReaction = useCallback(async (messageId: string, emoji: string) => {
         if (!activeChannelId || !activeServerId) return;
-        fetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages/${messageId}/reactions/${emoji}`, {
+        apiFetch(`${serverMap[activeServerId]}/api/channels/${activeChannelId}/messages/${messageId}/reactions/${emoji}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${currentAccount?.token || ''}` }
         }).catch(console.error);
@@ -313,7 +392,7 @@ export const ChatArea = () => {
             }
         }
 
-        fetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages/${messageId}`, {
+        apiFetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages/${messageId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${useAppStore.getState().currentAccount?.token || ''}` },
             body: JSON.stringify({ content: editValue, signature })
@@ -328,7 +407,7 @@ export const ChatArea = () => {
         const messageId = messageToDelete;
         setMessageToDelete(null);
 
-        fetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages/${messageId}`, {
+        apiFetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages/${messageId}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${useAppStore.getState().currentAccount?.token || ''}` }
         }).then(() => {
@@ -355,13 +434,15 @@ export const ChatArea = () => {
             setMessages([]);
             setFirstItemIndex(1000000);
             setHasMoreMessages(true);
+            setHasNewerMessages(false);
             try {
-                const res = await fetch(`${serverMap[serverId]}/api/channels/${channelId}/messages/around/${messageId}`, {
+                const res = await apiFetch(`${serverMap[serverId]}/api/channels/${channelId}/messages/around/${messageId}`, {
                     headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
                 });
                 const data = await res.json();
                 setMessages(data);
                 setHasMoreMessages(true);
+                setHasNewerMessages(true);
                 setJumpToMessageId(messageId);
                 // Do NOT clear pendingJump here — onJumpComplete clears it after scroll finishes
             } catch (e) {
@@ -374,7 +455,7 @@ export const ChatArea = () => {
         }
 
         try {
-            const res = await fetch(`${serverMap[serverId]}/api/servers/${serverId}/channels`, {
+            const res = await apiFetch(`${serverMap[serverId]}/api/guilds/${serverId}/channels`, {
                 headers: { 'Authorization': `Bearer ${useAppStore.getState().currentAccount?.token}` }
             });
             if (res.ok) {
@@ -410,11 +491,29 @@ export const ChatArea = () => {
     const currentProfile = serverProfiles.find(p => p.account_id === currentAccount?.id) || null;
 
     return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'row', backgroundColor: 'var(--bg-primary)', minWidth: 0, minHeight: 0 }}>
+        <div data-testid={wsConnected ? 'ws-connected' : undefined} style={{ flex: 1, display: 'flex', flexDirection: 'row', backgroundColor: 'var(--bg-primary)', minWidth: 0, minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
             {/* Header */}
             <div style={{ height: '48px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', padding: '0 16px', justifyContent: 'space-between', fontWeight: 'bold', flexShrink: 0 }}>
-                <span style={{ fontSize: '15px', color: 'var(--header-primary)' }}># {activeChannelName || 'active-channel'}</span>
+                <span
+                    style={{ fontSize: '15px', color: 'var(--header-primary)', cursor: 'pointer' }}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!activeChannelId || !activeServerId) return;
+                        const items = buildChannelMenu({
+                            channelId: activeChannelId,
+                            channelName: activeChannelName || 'active-channel',
+                            guildId: activeServerId,
+                            currentPermissions: currentUserPermissions,
+                            isUnread: unreadChannels.has(activeChannelId),
+                        });
+                        useContextMenuStore.getState().openContextMenu(
+                            { x: e.clientX, y: e.clientY },
+                            items
+                        );
+                    }}
+                ># {activeChannelName || 'active-channel'}</span>
                 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     {/* Search Bar */}
@@ -464,44 +563,97 @@ export const ChatArea = () => {
             )}
 
             {/* Message List */}
-            <MessageList 
-                ref={messageListRef}
-                messages={messages}
-                firstItemIndex={firstItemIndex}
-                editingMessageId={editingMessageId}
-                editValue={editValue}
-                setEditValue={setEditValue}
-                onCancelEdit={() => setEditingMessageId(null)}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                handleAddReaction={handleAddReaction}
-                handleRemoveReaction={handleRemoveReaction}
-                handleCopyLink={handleCopyLink}
-                onReply={(m) => setReplyingTo(m)}
-                activeEmojiPickerId={activeEmojiPickerId}
-                setActiveEmojiPickerId={setActiveEmojiPickerId}
-                serverMap={serverMap}
-                activeServerId={activeServerId}
-                activeChannelId={activeChannelId}
-                onLoadMore={handleLoadMore}
-                isLoadingMore={isLoadingMore}
-                currentProfileId={currentProfile?.id}
-                highlightedMessageId={highlightedMessageId}
-                jumpToMessageId={jumpToMessageId}
-                onJumpComplete={(id) => {
-                    setJumpToMessageId(null);
-                    useAppStore.getState().setPendingJump(null);
-                    setHighlightedMessageId(id);
-                    setTimeout(() => setHighlightedMessageId(null), 2500);
-                }}
-                typingIndicator={
-                    <TypingIndicator 
-                        activeChannelId={activeChannelId}
-                        currentAccountId={currentAccount?.id}
-                        addTypingListener={addTypingListener}
-                    />
-                }
-            />
+            <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <MessageList 
+                    ref={messageListRef}
+                    messages={messages}
+                    firstItemIndex={firstItemIndex}
+                    editingMessageId={editingMessageId}
+                    editValue={editValue}
+                    setEditValue={setEditValue}
+                    onCancelEdit={() => setEditingMessageId(null)}
+                    onEdit={onEdit}
+                    onStartEdit={(id, content) => { setEditingMessageId(id); setEditValue(content); }}
+                    onDelete={onDelete}
+                    handleAddReaction={handleAddReaction}
+                    handleRemoveReaction={handleRemoveReaction}
+                    handleCopyLink={handleCopyLink}
+                    onReply={(m) => setReplyingTo(m)}
+                    activeEmojiPickerId={activeEmojiPickerId}
+                    setActiveEmojiPickerId={setActiveEmojiPickerId}
+                    serverMap={serverMap}
+                    activeServerId={activeServerId}
+                    activeChannelId={activeChannelId}
+                    onLoadMore={handleLoadMore}
+                    isLoadingMore={isLoadingMore}
+                    onLoadNewer={handleLoadNewer}
+                    isLoadingNewer={isLoadingNewer}
+                    hasNewerMessages={hasNewerMessages}
+                    currentProfileId={currentProfile?.id}
+                    highlightedMessageId={highlightedMessageId}
+                    jumpToMessageId={jumpToMessageId}
+                    onJumpComplete={(id) => {
+                        setJumpToMessageId(null);
+                        useAppStore.getState().setPendingJump(null);
+                        setHighlightedMessageId(id);
+                        setTimeout(() => setHighlightedMessageId(null), 2500);
+                    }}
+                    typingIndicator={
+                        <TypingIndicator 
+                            activeChannelId={activeChannelId}
+                            currentAccountId={currentAccount?.id}
+                            addTypingListener={addTypingListener}
+                        />
+                    }
+                />
+
+                {hasNewerMessages && (
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '16px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 10,
+                    }}>
+                        <button
+                            onClick={() => {
+                                setMessages([]);
+                                setHasNewerMessages(false);
+                                setFirstItemIndex(1000000);
+                                setHasMoreMessages(true);
+                                apiFetch(`${serverMap[activeServerId!]}/api/channels/${activeChannelId}/messages?limit=${LIMIT}`, {
+                                    headers: { 'Authorization': `Bearer ${currentAccount?.token}` }
+                                })
+                                    .then(res => res.ok ? res.json() : [])
+                                    .then(async data => {
+                                        const safeData = Array.isArray(data) ? data : [];
+                                        const decrypted = await decryptMessages(safeData);
+                                        setMessages(decrypted);
+                                        if (safeData.length < LIMIT) setHasMoreMessages(false);
+                                    })
+                                    .catch(console.error);
+                            }}
+                            style={{
+                                padding: '8px 16px',
+                                backgroundColor: 'var(--brand-experiment, #5865F2)',
+                                color: 'white',
+                                borderRadius: '16px',
+                                border: 'none',
+                                fontWeight: 'bold',
+                                fontSize: '14px',
+                                cursor: 'pointer',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                transition: 'background-color 0.2s',
+                            }}
+                        >
+                            Jump to Present
+                        </button>
+                    </div>
+                )}
+            </div>
 
             {/* Input Box */}
             <MessageInput
@@ -522,6 +674,8 @@ export const ChatArea = () => {
                 }}
             />
         </div>
+
+        <MemberSidebar />
 
         <SearchSidebar 
             onJumpToMessage={handleJumpToMessage}

@@ -9,7 +9,35 @@ window.HTMLElement.prototype.scrollIntoView = vi.fn();
 vi.mock('react-virtuoso', () => {
     const React = require('react');
     return {
-        Virtuoso: React.forwardRef(({ data, itemContent, components, startReached, ...props }: any, ref: any) => {
+        Virtuoso: React.forwardRef(({
+            // Virtuoso-specific props — destructure to prevent DOM leakage
+            data,
+            itemContent,
+            components,
+            startReached,
+            firstItemIndex,
+            computeItemKey,
+            followOutput,
+            alignToBottom,
+            atBottomThreshold,
+            increaseViewportBy,
+            initialTopMostItemIndex,
+            totalCount,
+            overscan,
+            defaultItemHeight,
+            fixedItemHeight,
+            scrollSeekConfiguration,
+            rangeChanged,
+            isScrolling,
+            endReached,
+            atBottomStateChange,
+            atTopStateChange,
+            itemsRendered,
+            totalListHeightChanged,
+            scrollerRef,
+            // Safe HTML-passthrough props
+            ...htmlProps
+        }: any, ref: any) => {
             const viewportRef = React.useRef(null);
             React.useImperativeHandle(ref, () => ({
                 scrollToIndex: (global as any).mockScrollToIndex,
@@ -18,18 +46,18 @@ vi.mock('react-virtuoso', () => {
 
             return (
                 <div 
-                    {...props} 
+                    {...htmlProps} 
                     ref={viewportRef}
-                    style={{ overflowY: 'auto', ...props.style }}
+                    style={{ overflowY: 'auto', ...htmlProps.style }}
                     onScroll={(e: any) => {
                         if (e.target.scrollTop === 0 && startReached) {
                             startReached();
                         }
-                        props.onScroll?.(e);
+                        htmlProps.onScroll?.(e);
                     }}
                 >
                     {components?.Header && components.Header()}
-                    {data.map((item: any, index: number) => (
+                    {data?.map((item: any, index: number) => (
                         <div key={index}>{itemContent(index, item)}</div>
                     ))}
                     {components?.Footer && components.Footer()}
@@ -39,3 +67,12 @@ vi.mock('react-virtuoso', () => {
         GroupedVirtuoso: () => React.createElement('div', { 'data-testid': 'mock-grouped-virtuoso' })
     };
 });
+
+// Global ResizeObserver mock — used by scroll components, ChatArea, etc.
+// Must be a proper class (not vi.fn()) so `new ResizeObserver(cb)` works.
+global.ResizeObserver = class ResizeObserver {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+    constructor(_callback?: ResizeObserverCallback) {}
+} as any;

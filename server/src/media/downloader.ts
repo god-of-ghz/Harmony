@@ -50,9 +50,10 @@ export async function downloadAvatar(avatarUrl: string, type: 'global' | 'server
         relativePath = `/avatars/${id}${ext}`;
     } else {
         if (!serverId) throw new Error('serverId is required for server avatars');
-        const serverAvatarsDir = path.join(DATA_DIR, 'servers', serverId, 'avatars');
+        // P18 FIX: was 'servers' — data dir is now 'guilds'
+        const serverAvatarsDir = path.join(DATA_DIR, 'guilds', serverId, 'avatars');
         destPath = path.join(serverAvatarsDir, `${id}${ext}`);
-        relativePath = `/servers/${serverId}/avatars/${id}${ext}`;
+        relativePath = `/guilds/${serverId}/avatars/${id}${ext}`;
     }
 
     try {

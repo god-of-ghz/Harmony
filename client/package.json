@@ -1,7 +1,7 @@
 {
   "name": "client",
   "private": true,
-  "version": "0.4.0-alpha",
+  "version": "0.5.0-alpha",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -10,12 +10,16 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:env": "node ./scripts/test-env.js",
     "test:e2e": "npx playwright test",
+    "test:e2e:auto": "node ./scripts/clean-mock.cjs && npx playwright test",
     "package": "electron-packager . Harmony --platform=win32 --arch=x64 --out=release --overwrite"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "lucide-react": "^0.577.0",
+    "markdown-to-jsx": "^9.7.16",
     "mediasoup-client": "^3.18.7",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -45,6 +49,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^16.5.0",
     "jsdom": "^28.1.0",
+    "tree-kill": "^1.2.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1",

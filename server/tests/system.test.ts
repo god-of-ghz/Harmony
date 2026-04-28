@@ -124,10 +124,10 @@ describe('Harmony Server System Tests', () => {
         createdServerId = res.body.id;
         expect(createdServerId).toContain('server-');
 
-        // Verify filesystem
-        const serverPath = path.join(TEST_DATA_DIR, 'servers', createdServerId);
+        // P18 FIX: was 'servers' / 'server.db' — renamed to 'guilds' / 'guild.db' in P01
+        const serverPath = path.join(TEST_DATA_DIR, 'guilds', createdServerId);
         expect(fs.existsSync(serverPath)).toBe(true);
-        expect(fs.existsSync(path.join(serverPath, 'server.db'))).toBe(true);
+        expect(fs.existsSync(path.join(serverPath, 'guild.db'))).toBe(true);
     });
 
     it('GET /api/servers/:id/channels should list seeded channels', async () => {
@@ -378,7 +378,8 @@ describe('Harmony Server System Tests', () => {
 
         // 3. Verify file exists on disk
         const filename = path.basename(fileUrl);
-        const filePath = path.join(TEST_DATA_DIR, 'servers', createdServerId, 'uploads', filename);
+        // P18 FIX: was 'servers' — data dir is now 'guilds'
+        const filePath = path.join(TEST_DATA_DIR, 'guilds', createdServerId, 'uploads', filename);
         expect(fs.existsSync(filePath), `File should exist at ${filePath}`).toBe(true);
 
         // 4. Verify file is served by static middleware
@@ -397,8 +398,9 @@ describe('Harmony Server System Tests', () => {
         
         expect(res.status).toBe(200);
         const serverId = res.body.id;
-        const serverPath = path.join(TEST_DATA_DIR, 'servers', serverId);
-        const dbPath = path.join(serverPath, 'server.db');
+        // P18 FIX: was 'servers' / 'server.db' — renamed to 'guilds' / 'guild.db' in P01
+        const serverPath = path.join(TEST_DATA_DIR, 'guilds', serverId);
+        const dbPath = path.join(serverPath, 'guild.db');
         
         expect(fs.existsSync(dbPath)).toBe(true);
 

@@ -2,6 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+// NOTE: Do NOT set NODE_TLS_REJECT_UNAUTHORIZED here.
+// Server-to-server (federation) fetch calls use a scoped HTTPS agent via
+// src/utils/federationFetch.ts which handles self-signed certs in dev
+// without poisoning TLS verification for the entire Node.js process.
+
 if ((process as any).pkg) {
   try {
     const workerBin = path.join(__dirname, '../node_modules/mediasoup/worker/out/Release/mediasoup-worker.exe');

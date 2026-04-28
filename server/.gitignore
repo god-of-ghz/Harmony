@@ -1,0 +1,48 @@
+# Dependencies & Build
+node_modules
+dist
+
+# Coverage
+coverage
+coverage-system
+
+# Runtime data
+data
+release/data
+
+# Test data
+.test-data
+.tmp
+system_test_data
+federated_system_test_data
+test-data-a
+test-data-b
+mock_data
+mock_servers
+.rbac_test_tmp_*
+.uploads
+
+# Release binaries
+release/
+
+# Scratch / debug
+scratch/
+*.log
+test_log*.txt
+test_output*.txt
+test_output*.json
+test_result*.json
+test_run*.txt
+testout.txt
+vout*.txt
+vitest-out.json
+result.txt
+final_result.txt
+hash.txt
+error.txt
+errors.txt
+ts_errors.txt
+scratch_*.ts
+scratch_*.js
+setup_server.bat
+*.ts.new

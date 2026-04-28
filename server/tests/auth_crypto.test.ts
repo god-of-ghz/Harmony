@@ -4,21 +4,39 @@ import crypto from 'crypto';
 import { createApp, generateToken } from '../src/app';
 
 const mockDbManager = vi.hoisted(() => ({
+    channelToServerId: { get: (id: any) => String(id).includes('Unknown') ? null : 'sv1', set:()=>{}, delete:()=>{} },
+    channelToGuildId: { get: (id: any) => String(id).includes('Unknown') ? null : 'sv1', set:()=>{}, delete:()=>{} },
     allNodeQuery: vi.fn(),
     getNodeQuery: vi.fn(),
     runNodeQuery: vi.fn(),
     allServerQuery: vi.fn().mockResolvedValue([]),
+    allGuildQuery: vi.fn().mockResolvedValue([]),
     getServerQuery: vi.fn(),
+    getGuildQuery: vi.fn(),
     runServerQuery: vi.fn(),
+    runGuildQuery: vi.fn(),
     getAllLoadedServers: vi.fn().mockResolvedValue([]),
+    getAllLoadedGuilds: vi.fn().mockResolvedValue([]),
     initializeServerBundle: vi.fn(),
+    initializeGuildBundle: vi.fn(),
     unloadServerInstance: vi.fn(),
+    unloadGuildInstance: vi.fn(),
 }));
 
 vi.mock('../src/database', () => ({
     DATA_DIR: 'mock_data',
     default: mockDbManager
 }));
+
+// P18 FIX: Wire guild methods as aliases of server methods
+mockDbManager.allGuildQuery = mockDbManager.allServerQuery;
+mockDbManager.getGuildQuery = mockDbManager.getServerQuery;
+mockDbManager.runGuildQuery = mockDbManager.runServerQuery;
+mockDbManager.getAllLoadedGuilds = mockDbManager.getAllLoadedServers;
+mockDbManager.initializeGuildBundle = mockDbManager.initializeServerBundle;
+mockDbManager.unloadGuildInstance = mockDbManager.unloadServerInstance;
+mockDbManager.channelToGuildId = mockDbManager.channelToServerId;
+
 
 const app = createApp(mockDbManager, vi.fn());
 
