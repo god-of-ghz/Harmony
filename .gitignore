@@ -96,6 +96,8 @@ SERVERSAVER_EXPORT_SPEC.md
 # ===========================================================================
 scratch_*.js
 scratch_*.ts
+scratch.*
+*/scratch.*
 assess_coverage.js
 refactor_preview.js
 refactor_root.js
