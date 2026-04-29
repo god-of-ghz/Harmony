@@ -15,6 +15,8 @@ export interface MenuItem {
     rightIcon?: React.ReactNode;
     /** When set, renders this React node instead of the default menu item UI. */
     customComponent?: React.ReactNode;
+    /** When set, renders this React node as a flyout submenu instead of mapping children. */
+    customSubmenuComponent?: React.ReactNode;
 }
 
 // ── Toast Interface ──

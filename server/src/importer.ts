@@ -378,7 +378,10 @@ export async function importDirectory(dirPath: string, serverName: string) {
 
         // 1. Roles
         if (metadata.roles && metadata.roles.length > 0) {
-            const roleParams = metadata.roles.map(r => [r.id.toString(), guildId, r.name, r.color, r.permissions, r.position]);
+            const roleParams = metadata.roles.map(r => {
+                const color = r.color === '#000000' ? '#FFFFFF' : r.color;
+                return [r.id.toString(), guildId, r.name, color, r.permissions, r.position];
+            });
             await dbManager.runBatch(guildId, `INSERT OR IGNORE INTO roles (id, server_id, name, color, permissions, position) VALUES (?, ?, ?, ?, ?, ?)`, roleParams);
         }
 

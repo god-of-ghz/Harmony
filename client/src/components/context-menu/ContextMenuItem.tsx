@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import type { MenuItem } from '../../store/contextMenuStore';
+import { useViewportAwarePosition } from '../../hooks/useViewportAwarePosition';
 
 interface ContextMenuItemProps {
     item: MenuItem;
@@ -33,44 +34,14 @@ export const ContextMenuItem: React.FC<ContextMenuItemProps> = ({ item, onClose 
         scheduleHide();
     }, [scheduleHide]);
 
-    // Viewport-aware positioning for submenu
-    useEffect(() => {
-        if (!showSubmenu || !submenuRef.current || !itemRef.current) return;
-        
-        const submenu = submenuRef.current;
-        const itemRect = itemRef.current.getBoundingClientRect();
-        
-        // Reset to default first so we get an accurate natural rect
-        submenu.style.top = '-6px';
-        submenu.style.bottom = 'auto';
-        submenu.style.left = '100%';
-        submenu.style.right = 'auto';
-        
-        // Force layout
-        void submenu.offsetWidth;
-        
-        const rect = submenu.getBoundingClientRect();
-        const margin = 8;
-        
-        // Flip left if near right edge
-        if (rect.right > window.innerWidth) {
-            submenu.style.left = 'auto';
-            submenu.style.right = '100%';
-        }
-        
-        // Adjust vertical position if it goes off the bottom
-        if (rect.bottom > window.innerHeight) {
-            // Calculate how far we need to shift up to fit within the window
-            const targetGlobalBottom = window.innerHeight - margin;
-            const targetGlobalTop = targetGlobalBottom - rect.height;
-            // Don't shift higher than the top margin
-            const finalGlobalTop = Math.max(margin, targetGlobalTop);
-            
-            // Convert to relative position
-            const relativeTop = finalGlobalTop - itemRect.top;
-            submenu.style.top = `${relativeTop}px`;
-        }
-    }, [showSubmenu, item.children]);
+    // Viewport-aware positioning for submenu (uses shared reusable hook)
+    useViewportAwarePosition({
+        active: showSubmenu && (!!item.children || !!item.customSubmenuComponent),
+        floatingRef: submenuRef,
+        anchorRef: itemRef,
+        defaultLeft: '100%',
+        defaultTop: '-6px',
+    });
 
     // Separator rendering
     if (item.separator) {
@@ -86,8 +57,8 @@ export const ContextMenuItem: React.FC<ContextMenuItemProps> = ({ item, onClose 
     const handleClick = (e: React.MouseEvent) => {
         if (item.disabled) return;
         
-        // If it has children, don't close the menu
-        if (item.children) {
+        // If it has children or a custom submenu, don't close the menu
+        if (item.children || item.customSubmenuComponent) {
             e.stopPropagation();
             return;
         }
@@ -118,14 +89,14 @@ export const ContextMenuItem: React.FC<ContextMenuItemProps> = ({ item, onClose 
                     <div className="context-menu-description">{item.description}</div>
                 )}
             </div>
-            {item.children && (
+            {(item.children || item.customSubmenuComponent) && (
                 <span className="context-menu-submenu-arrow">▸</span>
             )}
             {item.rightIcon && (
                 <span className="context-menu-right-icon">{item.rightIcon}</span>
             )}
 
-            {item.children && showSubmenu && (
+            {item.children && showSubmenu && !item.customSubmenuComponent && (
                 <div 
                     ref={submenuRef}
                     className="context-menu submenu" 
@@ -143,6 +114,18 @@ export const ContextMenuItem: React.FC<ContextMenuItemProps> = ({ item, onClose 
                             <ContextMenuItem key={child.id} item={child} onClose={onClose} />
                         ))}
                     </div>
+                </div>
+            )}
+
+            {item.customSubmenuComponent && showSubmenu && (
+                <div 
+                    ref={submenuRef}
+                    style={{ position: 'absolute', top: '-6px', left: '100%' }}
+                    onMouseEnter={cancelHide}
+                    onMouseLeave={scheduleHide}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {item.customSubmenuComponent}
                 </div>
             )}
         </div>

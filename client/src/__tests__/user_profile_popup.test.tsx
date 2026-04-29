@@ -16,6 +16,9 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { useContextMenuStore } from '../store/contextMenuStore';
 import { useAppStore } from '../store/appStore';
 import type { Profile, RoleData, GlobalProfile } from '../store/appStore';
+import { apiFetch } from '../utils/apiFetch';
+
+vi.mock('../utils/apiFetch');
 
 // ── Test Data ──
 
@@ -181,6 +184,11 @@ describe('User Profile Popup', () => {
 
     describe('role pills', () => {
         it('shows role pills with correct colors (excludes @everyone)', async () => {
+            vi.mocked(apiFetch).mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ id: 'role-mod' }, { id: 'role-member' }]
+            } as any);
+
             useContextMenuStore.setState({
                 profilePopup: {
                     target: { accountId: 'account-other', profileId: 'profile-other', guildId: 'guild-1' },
@@ -191,13 +199,36 @@ describe('User Profile Popup', () => {
             const { UserProfilePopup } = await import('../components/context-menu/UserProfilePopup');
             render(<UserProfilePopup />);
 
-            const rolesContainer = screen.getByTestId('profile-popup-roles');
+            const rolesContainer = await screen.findByTestId('profile-popup-roles');
             expect(rolesContainer).toBeTruthy();
 
             // Should have Moderator and Member, but not @everyone
             expect(screen.getByTestId('role-pill-role-mod')).toBeTruthy();
             expect(screen.getByTestId('role-pill-role-member')).toBeTruthy();
             expect(screen.queryByTestId('role-pill-role-everyone')).toBeFalsy();
+        });
+        
+        it('does not show unassigned guild roles', async () => {
+            // Regression test: the popup used to show all guild roles indiscriminately
+            vi.mocked(apiFetch).mockResolvedValueOnce({
+                ok: true,
+                json: async () => [{ id: 'role-mod' }] // Only role-mod is assigned
+            } as any);
+
+            useContextMenuStore.setState({
+                profilePopup: {
+                    target: { accountId: 'account-other', profileId: 'profile-other', guildId: 'guild-1' },
+                    anchorRect: { top: 100, left: 100, width: 40, height: 40 },
+                },
+            });
+
+            const { UserProfilePopup } = await import('../components/context-menu/UserProfilePopup');
+            render(<UserProfilePopup />);
+
+            await screen.findByTestId('profile-popup-roles');
+            
+            expect(screen.getByTestId('role-pill-role-mod')).toBeTruthy();
+            expect(screen.queryByTestId('role-pill-role-member')).toBeFalsy(); // Role exists in guild, but not assigned
         });
     });
 

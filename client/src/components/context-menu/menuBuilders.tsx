@@ -7,6 +7,7 @@ import { apiFetch } from '../../utils/apiFetch';
 import { copyToClipboard, leaveGuild, deleteGuild, openGuildSettings, insertMention, deleteChannel, markChannelAsRead, copyMessageLink } from './contextActions';
 import type { ResolvedUserContext } from '../../types/UserTarget';
 import { QuickReactBar } from './QuickReactBar';
+import { EmojiPicker } from '../EmojiPicker';
 
 /**
  * Post-process a menu item list to remove consecutive, leading, and trailing separators.
@@ -29,6 +30,29 @@ const cleanSeparators = (items: MenuItem[]): MenuItem[] => {
         result.pop();
     }
     return result;
+};
+
+export const ContextCheckboxItem: React.FC<{ label: string, checked: boolean, onChange: (checked: boolean) => void }> = ({ label, checked, onChange }) => {
+    return (
+        <div 
+            className="context-menu-item"
+            onClick={(e) => {
+                e.stopPropagation(); // Keep menu open
+                onChange(!checked);
+            }}
+        >
+            <div className="context-menu-label">
+                <span>{label}</span>
+            </div>
+            <span className={`context-menu-checkbox ${checked ? 'checked' : ''}`}>
+                {checked && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                )}
+            </span>
+        </div>
+    );
 };
 
 interface GuildMenuContext {
@@ -519,11 +543,14 @@ export const buildMessageMenu = (ctx: MessageMenuContext): MenuItem[] => {
         }),
     });
 
-    // Add Reaction (submenu placeholder)
+    // Add Reaction (submenu)
     items.push({
         id: 'msg-add-reaction',
         label: 'Add Reaction',
-        children: [{ id: 'reaction-picker', label: 'Emoji picker coming soon' }],
+        customSubmenuComponent: <EmojiPicker onSelect={(emoji) => {
+            ctx.onAddReaction(emoji);
+            useContextMenuStore.getState().closeContextMenu();
+        }} onClose={() => useContextMenuStore.getState().closeContextMenu()} />
     });
 
     items.push({ id: 'msg-sep-1', separator: true });

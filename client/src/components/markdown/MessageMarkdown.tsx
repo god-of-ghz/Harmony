@@ -14,12 +14,17 @@ export const MessageMarkdown: React.FC<MessageMarkdownProps> = ({ content }) => 
     const processedContent = useMemo(() => {
         if (!content) return '';
 
-        // 0. Preserve newlines: Discord treats every \n as a visible line break,
+        // 0. Discord doesn't support Setext headings (e.g. Text \n ---). 
+        // markdown-to-jsx will turn large blocks of text into massive headers if a line 
+        // of dashes follows them. We escape lines of dashes/equals to prevent this.
+        let safeText = content.replace(/^([=-]{2,})\s*$/gm, '\\$1');
+
+        // 1. Preserve newlines: Discord treats every \n as a visible line break,
         // but standard Markdown ignores single newlines. Convert each \n to a
         // Markdown hard break (two trailing spaces + newline) so markdown-to-jsx
         // emits <br/> for them. We do this before HTML escaping since we're
         // operating on raw content structure.
-        let safeText = content.replace(/\n/g, '  \n');
+        safeText = safeText.replace(/\n/g, '  \n');
 
         // 1. Escape HTML to prevent XSS. 
         // We replace < so that any user-typed HTML is rendered as text.
@@ -48,8 +53,17 @@ export const MessageMarkdown: React.FC<MessageMarkdownProps> = ({ content }) => 
         return safeText;
     }, [content]);
 
+    const isEmojiOnly = useMemo(() => {
+        if (!content) return false;
+        // Check if the original content consists ONLY of unicode emojis, custom emojis, and whitespace.
+        // We include ZWJ (\u200d), variation selectors (\ufe0f), and keycap modifiers (\u20e3).
+        const emojiRegex = /^(?:[\s\u200d\ufe0f\u20e3]|<a?:\w+:\d+>|\p{Emoji_Presentation}|\p{Extended_Pictographic})+$/u;
+        return content.trim().length > 0 && emojiRegex.test(content);
+    }, [content]);
+
     return (
-        <Markdown
+        <div className={isEmojiOnly ? "emoji-only-message" : ""}>
+            <Markdown
             options={{
                 overrides: {
                     Spoiler: { component: Spoiler },
@@ -71,5 +85,6 @@ export const MessageMarkdown: React.FC<MessageMarkdownProps> = ({ content }) => 
         >
             {processedContent}
         </Markdown>
+        </div>
     );
 };

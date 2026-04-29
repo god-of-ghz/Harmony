@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useContextMenuStore } from '../../store/contextMenuStore';
 import { useAppStore } from '../../store/appStore';
 import { EditProfileDropdown } from './EditProfileDropdown';
+import { apiFetch } from '../../utils/apiFetch';
 
 export const UserProfilePopup: React.FC = () => {
     const profilePopup = useContextMenuStore((s) => s.profilePopup);
@@ -142,9 +143,34 @@ const ProfilePopupContent: React.FC<{
         : null;
     const isSelf = currentProfile?.id === target.profileId;
 
+    const [assignedRoleIds, setAssignedRoleIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (!target.guildId) return;
+
+        const fetchRoles = async () => {
+            const token = currentAccount?.token;
+            const nodeUrl = guildMap[target.guildId!];
+            if (!nodeUrl || !token) return;
+
+            try {
+                const res = await apiFetch(`${nodeUrl}/api/guilds/${target.guildId}/profiles/${target.profileId}/roles`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setAssignedRoleIds(data.map((r: { id: string; role_id?: string }) => r.id || r.role_id).filter(Boolean));
+                }
+            } catch (err) {
+                console.error('Failed to fetch profile roles:', err);
+            }
+        };
+        fetchRoles();
+    }, [target.guildId, target.profileId, currentAccount?.token, guildMap]);
+
     // Role pills — get profile roles from guild role data
     const profileRolePills = guildRoles
-        .filter((r) => r.name !== '@everyone')
+        .filter((r) => r.name !== '@everyone' && assignedRoleIds.includes(r.id))
         .slice(0, 5); // Show first 5 roles
 
     return (

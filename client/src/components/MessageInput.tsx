@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Image as ImageIcon, X } from 'lucide-react';
+import { Send, Image as ImageIcon, X, Plus, Smile } from 'lucide-react';
 import type { MessageData, Profile, RoleData } from '../store/appStore';
 import { useAppStore } from '../store/appStore';
 import { signPayload, deriveSharedKey, encryptMessageContent } from '../utils/crypto';
@@ -7,6 +7,10 @@ import { MentionAutocomplete } from './MentionAutocomplete';
 import { EmojiAutocomplete } from './EmojiAutocomplete';
 import { EMOJI_MAP } from '../utils/emojis';
 import type { EmojiData } from '../utils/emojis';
+import { useContextMenuStore } from '../store/contextMenuStore';
+import { QuickReactBar } from './context-menu/QuickReactBar';
+import { ContextCheckboxItem } from './context-menu/menuBuilders';
+import { EmojiPicker } from './EmojiPicker';
 
 interface MessageInputProps {
     activeChannelId: string;
@@ -43,6 +47,10 @@ export const MessageInput = React.memo(({
     const [autocompleteIndex, setAutocompleteIndex] = useState(0);
     const [autocompleteStartIdx, setAutocompleteStartIdx] = useState(-1);
     const [filteredOptions, setFilteredOptions] = useState<(Profile | RoleData)[]>([]);
+
+    const [isSendButtonEnabled, setIsSendButtonEnabled] = useState(true);
+    const [isSpellcheckEnabled, setIsSpellcheckEnabled] = useState(true);
+    const [showFloatingEmojiPicker, setShowFloatingEmojiPicker] = useState(false);
 
     const [showEmojiAutocomplete, setShowEmojiAutocomplete] = useState(false);
     const [emojiFilter, setEmojiFilter] = useState('');
@@ -300,6 +308,76 @@ export const MessageInput = React.memo(({
         }
     };
 
+    const handleInsertEmoji = (emoji: string) => {
+        setInputValue(prev => {
+            const el = inputRef.current;
+            if (el && el.selectionStart !== null) {
+                const start = el.selectionStart;
+                const before = prev.substring(0, start);
+                const after = prev.substring(start);
+                setTimeout(() => {
+                    el.selectionStart = el.selectionEnd = start + emoji.length;
+                    el.focus();
+                }, 0);
+                return `${before}${emoji}${after}`;
+            }
+            return prev + emoji;
+        });
+    };
+
+    const handlePlusClick = (e: React.MouseEvent) => {
+        useContextMenuStore.getState().openContextMenu({ x: e.clientX, y: e.clientY }, [
+            {
+                id: 'upload-file',
+                label: 'Upload a File',
+                onClick: () => {
+                    const fileInput = document.getElementById('message-attachment-input');
+                    if (fileInput) fileInput.click();
+                }
+            },
+            { id: 'share-clip', label: 'Share a Clip', onClick: () => useContextMenuStore.getState().showToast('Share a Clip coming soon') },
+            { id: 'create-thread', label: 'Create Thread', onClick: () => useContextMenuStore.getState().showToast('Create Thread coming soon') },
+            { id: 'create-poll', label: 'Create Poll', onClick: () => useContextMenuStore.getState().showToast('Create Poll coming soon') },
+            { id: 'use-apps', label: 'Use Apps', onClick: () => useContextMenuStore.getState().showToast('Use Apps coming soon') }
+        ]);
+    };
+
+    const handleMessageBarContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault();
+        useContextMenuStore.getState().openContextMenu({ x: e.clientX, y: e.clientY }, [
+            {
+                id: 'quick-react',
+                customComponent: React.createElement(QuickReactBar, {
+                    onAddReaction: handleInsertEmoji,
+                }),
+            },
+            {
+                id: 'add-emoji',
+                label: 'Add Emoji',
+                customSubmenuComponent: <EmojiPicker onSelect={(emoji) => {
+                    handleInsertEmoji(emoji);
+                    useContextMenuStore.getState().closeContextMenu();
+                }} onClose={() => useContextMenuStore.getState().closeContextMenu()} />
+            },
+            { id: 'sep-1', separator: true },
+            {
+                id: 'toggle-send-btn',
+                customComponent: <ContextCheckboxItem label="Send Message Button" checked={isSendButtonEnabled} onChange={setIsSendButtonEnabled} />
+            },
+            {
+                id: 'toggle-spellcheck',
+                customComponent: <ContextCheckboxItem label="Spellcheck" checked={isSpellcheckEnabled} onChange={setIsSpellcheckEnabled} />
+            },
+            { id: 'sep-2', separator: true },
+            {
+                id: 'paste',
+                label: 'Paste',
+                rightIcon: 'Ctrl+V',
+                onClick: () => { useContextMenuStore.getState().showToast('Use Ctrl+V to paste'); }
+            }
+        ]);
+    };
+
     const handlePaste = async (e: React.ClipboardEvent) => {
         const items = e.clipboardData.items;
         const files: File[] = [];
@@ -416,10 +494,13 @@ export const MessageInput = React.memo(({
                         </div>
                     </div>
                 )}
-                <div style={{ position: 'relative', backgroundColor: 'var(--bg-tertiary)', borderRadius: replyingTo ? '0 0 8px 8px' : '8px', display: 'flex', alignItems: 'flex-end', paddingRight: '12px' }}>
-                    <label style={{ padding: '12px', color: 'var(--interactive-normal)', cursor: 'pointer', display: 'flex' }}>
-                        <ImageIcon size={20} />
-                        <input type="file" multiple style={{ display: 'none' }} onChange={async (e) => {
+                <div 
+                    style={{ position: 'relative', backgroundColor: 'var(--bg-tertiary)', borderRadius: replyingTo ? '0 0 8px 8px' : '8px', display: 'flex', alignItems: 'flex-end', paddingRight: '12px' }}
+                    onContextMenu={handleMessageBarContextMenu}
+                >
+                    <div style={{ padding: '12px', color: 'var(--interactive-normal)', cursor: 'pointer', display: 'flex' }} onClick={handlePlusClick}>
+                        <Plus size={20} />
+                        <input id="message-attachment-input" type="file" multiple style={{ display: 'none' }} onChange={async (e) => {
                             if (!e.target.files?.length) return;
                             const files = Array.from(e.target.files);
                             const blocked = ['.exe', '.bat', '.cmd', '.msi', '.scr', '.com', '.pif', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.ps1', '.dll', '.sys', '.cpl', '.inf', '.reg', '.hta', '.jar', '.zip', '.7z', '.rar', '.tar', '.gz', '.iso', '.dmg', '.deb', '.rpm', '.apk', '.app'];
@@ -449,7 +530,7 @@ export const MessageInput = React.memo(({
                             }
                             e.target.value = '';
                         }} />
-                    </label>
+                    </div>
                     <textarea
                         ref={inputRef}
                         className="input-field"
@@ -457,6 +538,7 @@ export const MessageInput = React.memo(({
                         style={{ backgroundColor: 'transparent', resize: 'none', overflow: 'hidden', lineHeight: '20px' }}
                         placeholder={`Message #${activeChannelName || 'active-channel'}`}
                         value={inputValue}
+                        spellCheck={isSpellcheckEnabled}
                         maxLength={10000}
                         onChange={e => {
                             const val = e.target.value;
@@ -560,12 +642,33 @@ export const MessageInput = React.memo(({
                             {inputValue.length}/10000
                         </div>
                     )}
-                    <Send
-                        size={20}
-                        color={(inputValue.trim() || pendingAttachments.length > 0) ? "var(--interactive-hover)" : "var(--interactive-normal)"}
-                        onClick={handleSend}
-                        style={{ cursor: 'pointer' }}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '12px' }}>
+                        <Smile 
+                            size={20} 
+                            color={showFloatingEmojiPicker ? 'var(--interactive-active)' : 'var(--interactive-normal)'}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => setShowFloatingEmojiPicker(!showFloatingEmojiPicker)}
+                        />
+                        {isSendButtonEnabled && (
+                            <Send
+                                size={20}
+                                color={(inputValue.trim() || pendingAttachments.length > 0) ? "var(--interactive-hover)" : "var(--interactive-normal)"}
+                                onClick={handleSend}
+                                style={{ cursor: 'pointer' }}
+                            />
+                        )}
+                    </div>
+                    {showFloatingEmojiPicker && (
+                        <div style={{ position: 'absolute', bottom: '100%', right: '16px', marginBottom: '8px', zIndex: 100 }}>
+                            <EmojiPicker 
+                                onSelect={(emoji) => {
+                                    handleInsertEmoji(emoji);
+                                    setShowFloatingEmojiPicker(false);
+                                }}
+                                onClose={() => setShowFloatingEmojiPicker(false)}
+                            />
+                        </div>
+                    )}
                     {showAutocomplete && (
                         <MentionAutocomplete 
                             options={filteredOptions} 

@@ -1,5 +1,5 @@
 /// <reference types="@testing-library/jest-dom" />
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MessageItem } from '../../../src/components/MessageItem';
 import { useAppStore } from '../../../src/store/appStore';
@@ -165,11 +165,8 @@ describe('MessageItem Component', () => {
     it('calls onStartEdit when clicking the edit pencil icon as author', () => {
         const onStartEditMock = vi.fn();
         render(<MessageItem {...defaultProps} msg={mockMsg as any} isAuthor={true} onStartEdit={onStartEditMock} />);
-        
-        import('@testing-library/react').then(({ fireEvent }) => {
-            const editButton = screen.getByTestId('edit-message');
-            fireEvent.click(editButton);
-            expect(onStartEditMock).toHaveBeenCalledWith('msg1', 'Hello world');
-        });
+        const editButton = screen.getByTestId('edit-message');
+        fireEvent.click(editButton);
+        expect(onStartEditMock).toHaveBeenCalledWith('msg1', 'Hello world');
     });
 });

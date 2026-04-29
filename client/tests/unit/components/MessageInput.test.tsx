@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom';
 import { MessageInput } from '../../../src/components/MessageInput';
 import { useAppStore } from '../../../src/store/appStore';
+import { useContextMenuStore } from '../../../src/store/contextMenuStore';
 
 // Mock crypto
 vi.mock('../../../src/utils/crypto', () => ({
@@ -257,6 +258,72 @@ describe('MessageInput Mention Autocomplete', () => {
                 expect.objectContaining({
                     method: 'POST'
                 })
+            );
+        });
+    });
+
+    describe('Context Menus & Icons', () => {
+        beforeEach(() => {
+            vi.spyOn(useContextMenuStore.getState(), 'openContextMenu').mockImplementation(() => {});
+        });
+
+        it('clicking the + icon opens the attachment context menu', () => {
+            render(
+                <MessageInput 
+                    activeChannelId="chan1"
+                    activeChannelName="general"
+                    activeServerId="serv1"
+                    serverUrl="http://localhost"
+                    currentProfile={mockProfiles[0] as any}
+                    currentAccount={{id: 'acc1', token: 'test-token'}}
+                    sessionPrivateKey={{} as any}
+                    replyingTo={null}
+                    setReplyingTo={() => {}}
+                    wsRef={wsRef}
+                />
+            );
+
+            // The plus icon is rendered inside a div next to the input
+            const plusIcon = screen.getByRole('textbox').previousSibling as HTMLElement;
+            fireEvent.click(plusIcon);
+
+            expect(useContextMenuStore.getState().openContextMenu).toHaveBeenCalledWith(
+                expect.any(Object),
+                expect.arrayContaining([
+                    expect.objectContaining({ id: 'upload-file', label: 'Upload a File' })
+                ])
+            );
+        });
+
+        it('right clicking the message bar opens the context menu', () => {
+            render(
+                <MessageInput 
+                    activeChannelId="chan1"
+                    activeChannelName="general"
+                    activeServerId="serv1"
+                    serverUrl="http://localhost"
+                    currentProfile={mockProfiles[0] as any}
+                    currentAccount={{id: 'acc1', token: 'test-token'}}
+                    sessionPrivateKey={{} as any}
+                    replyingTo={null}
+                    setReplyingTo={() => {}}
+                    wsRef={wsRef}
+                />
+            );
+
+            // The container of the textarea has the onContextMenu handler
+            const container = screen.getByRole('textbox').parentElement!;
+            fireEvent.contextMenu(container);
+
+            expect(useContextMenuStore.getState().openContextMenu).toHaveBeenCalledWith(
+                expect.any(Object),
+                expect.arrayContaining([
+                    expect.objectContaining({ id: 'quick-react' }),
+                    expect.objectContaining({ id: 'add-emoji' }),
+                    expect.objectContaining({ id: 'toggle-send-btn' }),
+                    expect.objectContaining({ id: 'toggle-spellcheck' }),
+                    expect.objectContaining({ id: 'paste' })
+                ])
             );
         });
     });

@@ -137,4 +137,35 @@ describe('EmojiPicker', () => {
         // Should still show normal categories
         expect(screen.getByText('smileys')).toBeInTheDocument();
     });
+
+    it('closes when the Escape key is pressed', () => {
+        render(<EmojiPicker onSelect={onSelect} onClose={onClose} />);
+        
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.keyDown(document, { key: 'Escape' });
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes when clicking outside the component', () => {
+        render(
+            <div>
+                <div data-testid="outside-element">Outside</div>
+                <EmojiPicker onSelect={onSelect} onClose={onClose} />
+            </div>
+        );
+        
+        expect(onClose).not.toHaveBeenCalled();
+        fireEvent.mouseDown(screen.getByTestId('outside-element'));
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not close when clicking inside the component', () => {
+        render(<EmojiPicker onSelect={onSelect} onClose={onClose} />);
+        
+        expect(onClose).not.toHaveBeenCalled();
+        // The search input is inside the EmojiPicker
+        const searchInput = screen.getByPlaceholderText('Search emojis...');
+        fireEvent.mouseDown(searchInput);
+        expect(onClose).not.toHaveBeenCalled();
+    });
 });

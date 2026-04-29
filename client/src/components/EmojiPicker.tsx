@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Search } from 'lucide-react';
 
 interface EmojiPickerProps {
@@ -16,6 +16,26 @@ const EMOJI_LIST: Record<string, string[]> = {
 export const EmojiPicker: React.FC<EmojiPickerProps> = ({ onSelect, onClose }) => {
     const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const pickerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        const handleOutsideClick = (e: MouseEvent) => {
+            if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        document.addEventListener('mousedown', handleOutsideClick);
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            document.removeEventListener('mousedown', handleOutsideClick);
+        };
+    }, [onClose]);
 
     useEffect(() => {
         const stored = localStorage.getItem('recent_emojis');
@@ -42,18 +62,15 @@ export const EmojiPicker: React.FC<EmojiPickerProps> = ({ onSelect, onClose }) =
         : EMOJI_LIST;
 
     return (
-        <div className="glass-panel" style={{
+        <div ref={pickerRef} style={{
             width: '320px',
             height: '400px',
             display: 'flex',
             flexDirection: 'column',
-            borderRadius: '8px',
+            backgroundColor: '#111214',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
+            borderRadius: '4px',
             overflow: 'hidden',
-            zIndex: 100,
-            position: 'absolute',
-            bottom: '100%',
-            right: 0,
-            marginBottom: '8px',
             animation: 'fadeInUp 0.15s ease-out'
         }}>
             <style>

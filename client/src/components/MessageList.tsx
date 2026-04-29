@@ -87,6 +87,49 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
     // jumpKey forces Virtuoso to remount when a jump occurs, so initialTopMostItemIndex takes effect
     const [jumpKey, setJumpKey] = useState(0);
 
+    const currentProfile = useAppStore(useCallback(state => 
+        state.claimedProfiles.find(p => p.server_id === activeServerId), 
+    [activeServerId]));
+    const serverRoles = useAppStore(state => state.serverRoles);
+
+    const mentionChecks = useMemo(() => {
+        if (!currentProfile) return { ids: [], roleIds: [], tags: [] };
+        
+        const ids = [currentProfile.id];
+        const tags = [
+            `@${currentProfile.nickname}`,
+            `@${currentProfile.original_username}`
+        ];
+        
+        if (currentProfile.aliases) {
+            currentProfile.aliases.split(',').forEach(a => {
+                const alias = a.trim();
+                if (alias) {
+                    ids.push(alias);
+                    tags.push(`@${alias}`);
+                }
+            });
+        }
+        
+        const roleIds: string[] = [];
+        if (currentProfile.role) {
+            currentProfile.role.split(',').forEach(r => {
+                const roleId = r.trim();
+                if (roleId) {
+                    roleIds.push(roleId);
+                    const role = serverRoles.find(sr => sr.id === roleId);
+                    if (role) {
+                        tags.push(`@${role.name}`);
+                    }
+                }
+            });
+        }
+        
+        tags.push('@everyone', '@here');
+        
+        return { ids, roleIds, tags };
+    }, [currentProfile, serverRoles]);
+
     useEffect(() => {
         if (activeChannelId) {
             setIsInitialLoading(true);
@@ -195,6 +238,26 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         const msg = item.msg;
         const isEditing = editingMessageId === msg.id;
 
+        let isMentioned = false;
+        if (currentProfile) {
+            const { ids, roleIds, tags } = mentionChecks;
+            const contentLower = msg.content.toLowerCase();
+            
+            if (tags.some(tag => contentLower.includes(tag.toLowerCase()))) {
+                isMentioned = true;
+            } else {
+                const userMentionMatches = [...msg.content.matchAll(/<@!?([^>]+)>/g)];
+                if (userMentionMatches.some(m => ids.includes(m[1]))) {
+                    isMentioned = true;
+                } else if (roleIds && roleIds.length > 0) {
+                    const roleMentionMatches = [...msg.content.matchAll(/<@&([^>]+)>/g)];
+                    if (roleMentionMatches.some(m => roleIds.includes(m[1]))) {
+                        isMentioned = true;
+                    }
+                }
+            }
+        }
+
         return (
             <MessageItem
                 key={msg.id}
@@ -202,7 +265,7 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
                 isGrouped={item.isGrouped}
                 showDaySeparator={item.showDaySeparator}
                 daySeparatorDate={item.dateString}
-                isMentioned={false} 
+                isMentioned={isMentioned} 
                 isAuthor={msg.author_id === currentProfileId}    
                 isEditing={isEditing}
                 editValue={editValue}
@@ -239,7 +302,9 @@ export const MessageList = React.memo(forwardRef<MessageListHandle, MessageListP
         serverMap, 
         activeServerId,
         currentProfileId,
-        highlightedMessageId
+        highlightedMessageId,
+        currentProfile,
+        mentionChecks
     ]);
 
     if (listItems.length === 0) {

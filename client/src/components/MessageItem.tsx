@@ -274,13 +274,14 @@ export const MessageItem = React.memo(({
                             const hasReacted = msg.reactions?.some((r: any) => r.author_id === currentProfileId && r.emoji === emoji);
                             return (
                                 <div key={emoji}
-                                    style={{ padding: '2px 6px', backgroundColor: hasReacted ? 'var(--brand-experiment-30a)' : 'var(--bg-modifier-selected)', border: hasReacted ? '1px solid var(--brand-experiment)' : '1px solid transparent', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    style={{ padding: '4px 8px', backgroundColor: hasReacted ? 'var(--brand-experiment-30a)' : 'var(--bg-modifier-selected)', border: hasReacted ? '1px solid var(--brand-experiment)' : '1px solid transparent', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
                                     onClick={() => {
                                         if (hasReacted) onRemoveReaction(msg.id, emoji);
                                         else onAddReaction(msg.id, emoji);
                                     }}
                                 >
-                                    {emoji} <span style={{ fontSize: '12px' }}>{count}</span>
+                                    <span style={{ fontSize: '16px', lineHeight: 1 }}>{emoji}</span>
+                                    <span style={{ fontSize: '14px', fontWeight: 600, color: hasReacted ? 'var(--brand-experiment)' : 'var(--text-muted)' }}>{count}</span>
                                 </div>
                             );
                         })}
@@ -304,16 +305,19 @@ export const MessageItem = React.memo(({
                     userSelect: 'none'
                 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '0 10px' }}>
-                        <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }} onClick={() => onAddReaction(msg.id, '👍')}>👍</span>
-                        <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }} onClick={() => onAddReaction(msg.id, '❤️')}>❤️</span>
-                        <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }} onClick={() => onAddReaction(msg.id, '😂')}>😂</span>
+                        <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', fontSize: '18px' }} onClick={() => onAddReaction(msg.id, '👍')}>👍</span>
+                        <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', fontSize: '18px' }} onClick={() => onAddReaction(msg.id, '❤️')}>❤️</span>
+                        <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', fontSize: '18px' }} onClick={() => onAddReaction(msg.id, '😂')}>😂</span>
 
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }}>
-                            <Smile size={16} style={{ cursor: 'pointer', color: activeEmojiPickerId === msg.id ? 'var(--interactive-active)' : 'var(--text-muted)' }} onClick={() => setActiveEmojiPickerId(activeEmojiPickerId === msg.id ? null : msg.id)} />
+                            <Smile size={18} style={{ cursor: 'pointer', color: activeEmojiPickerId === msg.id ? 'var(--interactive-active)' : 'var(--text-muted)' }} onClick={() => setActiveEmojiPickerId(activeEmojiPickerId === msg.id ? null : msg.id)} />
                             {activeEmojiPickerId === msg.id && (
                                 <div style={{ position: 'absolute', bottom: '100%', right: 0, marginBottom: '8px', zIndex: 100 }}>
                                     <EmojiPicker
-                                        onSelect={(emoji) => onAddReaction(msg.id, emoji)}
+                                        onSelect={(emoji) => {
+                                            onAddReaction(msg.id, emoji);
+                                            setActiveEmojiPickerId(null);
+                                        }}
                                         onClose={() => setActiveEmojiPickerId(null)}
                                     />
                                 </div>
