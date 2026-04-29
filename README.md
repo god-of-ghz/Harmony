@@ -4,7 +4,7 @@ Harmony is a privately hosted, federated chat messaging platform — an open-sou
 
 **Note: This project is currently in active alpha development. Latest Release: v0.5 Alpha (April 2026)**
 
-> ⚠️ **Internet-facing deployments are intentionally disabled in this release.** The CORS policy and TLS configuration are locked to `localhost` origins only. This is deliberate — we've performed massive architectural overhauls since v0.4 and need to stabilize locally before re-enabling public access. LAN and localhost usage works fully.
+> ⚠️ **Internet-facing deployments are intentionally disabled in this release.** The CORS policy and TLS configuration are locked to `localhost` origins only. This is deliberate — we've performed massive architectural overhauls since v0.4 and need to stabilize locally before re-enabling public access. LAN and localhost usage are fully functional. If you would like to try an internet-facing deployment, the older v0.4-alpha release is functional but insecure. Use at your own risk. 
 
 ---
 
